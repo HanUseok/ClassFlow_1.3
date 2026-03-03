@@ -1,0 +1,100 @@
+flowchart LR
+  %% Swimlanes
+  subgraph T["Teacher"]
+    T0["Teacher 진입 URL 접근"]
+    T1["/teacher 대시보드"]
+    T2["/teacher/sessions 목록"]
+    T3["/teacher/sessions/create 생성/수정"]
+    T4["/teacher/sessions/[id] 상세/진행"]
+    T5["/teacher/sessions/[id]/report 리포트"]
+    T6["/teacher/students 목록"]
+    T7["/teacher/students/[id] 상세"]
+    T8["/teacher/settings 설정"]
+    T9["토론 종료 후 리포트 확인"]
+    T10["발표 진행/종료"]
+  end
+
+  subgraph S["Student / Station"]
+    S0["/station 진입"]
+    S1["대기 화면(waiting)"]
+    S2["입장 클릭"]
+    S3["실시간 토론 화면(live)"]
+    S4["발언 기록(Quick Add)"]
+    S5["토론 종료"]
+    S6["/station/report?source=station"]
+    S7["스테이션 처음 화면으로 복귀"]
+  end
+
+  subgraph SYS["System"]
+    Y0["/ 접근 시 /teacher로 redirect"]
+    Y1["세션 저장소(localStorage) 로드"]
+    Y2["세션 상태: Pending | Live | Ended"]
+    Y3["세션 타입 분기: Debate | Presentation"]
+    Y4["리포트 URL 생성(/station/report?... )"]
+    Y5["잘못된 id/데이터 예외 처리"]
+    Y6["빈 상태 처리(세션/학생/로그 없음)"]
+    Y7["새로고침: 세션 데이터 복원"]
+    Y8["새로고침: 진행 중 런타임 상태 초기화"]
+  end
+
+  %% Entry
+  T0 --> Y0 --> T1
+  S0 --> Y1 --> S1
+  T1 --> Y1
+  T2 --> Y1
+  T4 --> Y1
+
+  %% Teacher global nav
+  T1 --> T2
+  T1 --> T6
+  T1 --> T8
+  T6 --> T7
+
+  %% Session creation/list/detail
+  T1 --> T3
+  T2 --> T3
+  T2 -->|상태=Pending| T3
+  T2 -->|상태=Live| T4
+  T2 -->|상태=Ended| T5
+  T3 -->|세션 실행| T4
+  T3 -->|저장| T2
+  T3 -->|뒤로가기(router.back)| T2
+
+  %% Detail branching
+  T4 --> Y3
+  Y3 -->|Debate| T4
+  Y3 -->|Presentation| T10
+  T10 -->|시작| Y2
+  T10 -->|마지막 발표 종료| Y2
+  Y2 -->|Ended| T5
+
+  %% Debate flow (teacher)
+  T4 -->|발언 시작/토론 시작| Y2
+  Y2 -->|Live| T4
+  T4 -->|토론 종료| Y4 --> T9
+  T9 --> T5
+
+  %% Station flow
+  S1 -->|활성 토론 없음| Y6
+  S1 -->|입장| S2 --> S3
+  S3 --> S4
+  S4 -->|발언 저장/종료 반복| S3
+  S3 -->|토론 종료| S5 --> Y2
+  S5 --> Y4 --> S6
+  S6 -->|source=station| S7 --> S0
+  S6 -->|view 전환(report/manage)| S6
+
+  %% Exceptions
+  T4 -->|id 미존재| Y5 --> T2
+  T5 -->|토론 세션 아님/없음| Y5 --> T2
+  T7 -->|student id 미존재| Y5
+  S6 -->|logs/groupLayout 파싱 실패| Y5 --> Y6
+
+  %% Refresh/back expectations
+  T1 -->|브라우저 새로고침| Y7
+  T2 -->|브라우저 새로고침| Y7
+  T4 -->|브라우저 새로고침| Y7
+  S0 -->|브라우저 새로고침| Y7
+  Y7 --> Y8
+  Y8 --> T4
+  Y8 --> S1
