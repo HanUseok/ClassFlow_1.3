@@ -117,7 +117,12 @@ function CreateSessionContent() {
           .filter((id) => classStudentIds.has(id))
       )
 
-      setSelectedStudentIds(selectedIdsFromConfig.size > 0 ? selectedIdsFromConfig : participantIds)
+      const resolvedSelectedIds = selectedIdsFromConfig.size > 0 ? selectedIdsFromConfig : participantIds
+      setSelectedStudentIds(resolvedSelectedIds)
+      const recordingIdsFromConfig = new Set(
+        (assignmentConfig?.recordingStudentIds ?? []).filter((id) => classStudentIds.has(id))
+      )
+      setRecordingStudentIds(recordingIdsFromConfig.size > 0 ? recordingIdsFromConfig : new Set(resolvedSelectedIds))
       setDebateMode(editingSession.debate?.mode ?? "Ordered")
       setTeacherGuided(editingSession.debate?.teacherGuided ? "guided" : "unguided")
 
@@ -257,8 +262,19 @@ function CreateSessionContent() {
     setGroupAssignments({})
     setGroupSlotAdjust({})
     setGroupCount(2)
-    setDebateStep("headcount")
-  }, [])
+    if (isDebate) setDebateStep("headcount")
+  }, [
+    classes,
+    isDebate,
+    setDebateStep,
+    setGroupAssignments,
+    setGroupCount,
+    setGroupSlotAdjust,
+    setPresenterOrderIds,
+    setRecordingStudentIds,
+    setSelectedClassId,
+    setSelectedStudentIds,
+  ])
 
   const toggleStudent = useCallback((studentId: string) => {
     setSelectedStudentIds((prev) => {
@@ -312,7 +328,12 @@ function CreateSessionContent() {
 
   const presentationReady = !isDebate && selectedCount > 0 && presentationMinutesPerStudent > 0
   const canGoHeadcount = Boolean(selectedClass && selectedStudentIds.size > 0)
-  const canGoCards = canGoHeadcount
+  const hasAnyNonRecordingStudent = useMemo(
+    () => Array.from(selectedStudentIds).some((id) => !recordingStudentIds.has(id)),
+    [selectedStudentIds, recordingStudentIds]
+  )
+  const shouldUseCardsStep = isDebate && hasAnyNonRecordingStudent
+  const canGoCards = canGoHeadcount && shouldUseCardsStep
   const hasEnoughSlots = slotCapacity >= selectedCount
   const orderedFlowValid =
     debateMode !== "Ordered" ||
@@ -326,9 +347,16 @@ function CreateSessionContent() {
     setIsGeneratingCards,
     setDebateStep,
   })
+  useEffect(() => {
+    if (!isDebate) return
+    if (shouldUseCardsStep) return
+    if (debateStep === "cards") setDebateStep("headcount")
+  }, [isDebate, shouldUseCardsStep, debateStep, setDebateStep])
+
+  const cardsReadyForCreate = shouldUseCardsStep ? cardsReady : true
   const canCreate = Boolean(
     selectedClassId &&
-      (isDebate ? orderedFlowValid && cardsReady && hasEnoughSlots : presentationReady)
+      (isDebate ? orderedFlowValid && cardsReadyForCreate && hasEnoughSlots : presentationReady)
   )
 
   const buildCreateInput = (): Parameters<typeof create>[0] | null => {
@@ -345,6 +373,7 @@ function CreateSessionContent() {
       negativeSlots,
       moderatorSlots,
       selectedStudentIds,
+      recordingStudentIds,
       groupAssignments,
       affirmativeStudents,
       negativeStudents,
@@ -424,15 +453,17 @@ function CreateSessionContent() {
             >
               2. 인원 설정
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={debateStep === "cards" ? "default" : "outline"}
-              onClick={() => openCardsStep(false)}
-              disabled={!canGoCards}
-            >
-              3. 논거카드 검수
-            </Button>
+            {shouldUseCardsStep ? (
+              <Button
+                type="button"
+                size="sm"
+                variant={debateStep === "cards" ? "default" : "outline"}
+                onClick={() => openCardsStep(false)}
+                disabled={!canGoCards}
+              >
+                3. 논거카드 검수
+              </Button>
+            ) : null}
           </div>
         ) : null}
 
@@ -454,7 +485,7 @@ function CreateSessionContent() {
           onGoHeadcount={() => setDebateStep("headcount")}
         />
 
-        {isDebate && debateStep === "headcount" ? (
+        {(isDebate ? debateStep === "headcount" : true) ? (
           <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
             <div className="flex flex-col gap-2">
               <Label>학급</Label>
@@ -476,82 +507,97 @@ function CreateSessionContent() {
               <div className="flex flex-col gap-2">
                 <Label>명단 ({selectedStudentIds.size}명 선택)</Label>
                 <div className="divide-y divide-border rounded-lg border border-border">
-                  {selectedClass.students.map((student) => (
-                    <label
-                      key={student.id}
-                      className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/50"
-                    >
-                      <Checkbox
-                        checked={selectedStudentIds.has(student.id)}
-                        onCheckedChange={() => toggleStudent(student.id)}
-                      />
-                      <span className="text-sm text-foreground">{student.name}</span>
-                    </label>
-                  ))}
+                  {selectedClass.students.map((student) => {
+                    const isSelected = selectedStudentIds.has(student.id)
+                    return (
+                      <div key={student.id} className="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-accent/50">
+                        <label className="flex cursor-pointer items-center gap-3">
+                          <Checkbox checked={isSelected} onCheckedChange={() => toggleStudent(student.id)} />
+                          <span className="text-sm text-foreground">{student.name}</span>
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                          <Checkbox
+                            checked={recordingStudentIds.has(student.id)}
+                            disabled={!isSelected}
+                            onCheckedChange={() => toggleRecordingStudent(student.id)}
+                          />
+                          녹음
+                        </label>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             ) : null}
 
-            <div className="grid gap-2 md:grid-cols-3">
-              <div className="rounded-md border border-border p-2">
-                <p className="mb-1 text-xs text-muted-foreground">조 수</p>
-                <div className="flex items-center gap-1">
-                  <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setGroupCount((v) => Math.max(1, v - 1))}>
-                    <Minus className="h-3 w-3" />
-                  </Button>
-                  <Input type="number" min={1} value={groupCount} onChange={(e) => setGroupCount(Math.max(1, Number(e.target.value) || 1))} className="h-7 text-center" />
-                  <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setGroupCount((v) => v + 1)}>
-                    <Plus className="h-3 w-3" />
-                  </Button>
+            {isDebate ? (
+              <div className="grid gap-2 md:grid-cols-3">
+                <div className="rounded-md border border-border p-2">
+                  <p className="mb-1 text-xs text-muted-foreground">조 수</p>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setGroupCount((v) => Math.max(1, v - 1))}>
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                    <Input type="number" min={1} value={groupCount} onChange={(e) => setGroupCount(Math.max(1, Number(e.target.value) || 1))} className="h-7 text-center" />
+                    <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={() => setGroupCount((v) => v + 1)}>
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-border p-2">
+                  <p className="mb-1 text-xs text-muted-foreground">찬반 슬롯/조</p>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={Math.max(affirmativeSlots, negativeSlots)}
+                    onChange={(e) => {
+                      const next = Math.max(0, Number(e.target.value) || 0)
+                      setAffirmativeSlots(next)
+                      setNegativeSlots(next)
+                    }}
+                    className="h-7 text-center"
+                  />
+                </div>
+
+                <div className="rounded-md border border-border p-2">
+                  <p className="mb-1 text-xs text-muted-foreground">진행자 슬롯/조</p>
+                  <Input type="number" min={0} value={moderatorSlots} onChange={(e) => setModeratorSlots(Math.max(0, Number(e.target.value) || 0))} className="h-7 text-center" />
                 </div>
               </div>
+            ) : null}
 
-              <div className="rounded-md border border-border p-2">
-                <p className="mb-1 text-xs text-muted-foreground">찬반 슬롯/조</p>
-                <Input
-                  type="number"
-                  min={0}
-                  value={Math.max(affirmativeSlots, negativeSlots)}
-                  onChange={(e) => {
-                    const next = Math.max(0, Number(e.target.value) || 0)
-                    setAffirmativeSlots(next)
-                    setNegativeSlots(next)
-                  }}
-                  className="h-7 text-center"
-                />
+            {isDebate ? (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                총 슬롯 {slotCapacity}칸 / 선택 학생 {selectedCount}명
               </div>
+            ) : null}
 
-              <div className="rounded-md border border-border p-2">
-                <p className="mb-1 text-xs text-muted-foreground">진행자 슬롯/조</p>
-                <Input type="number" min={0} value={moderatorSlots} onChange={(e) => setModeratorSlots(Math.max(0, Number(e.target.value) || 0))} className="h-7 text-center" />
-              </div>
-            </div>
-
-            <div className="rounded-md border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-              총 슬롯 {slotCapacity}칸 / 선택 학생 {selectedCount}명
-            </div>
-
-            {!hasEnoughSlots && selectedCount > 0 ? (
+            {isDebate && !hasEnoughSlots && selectedCount > 0 ? (
               <p className="text-xs text-destructive">선택 학생을 모두 배치하려면 슬롯 수를 늘려야 합니다.</p>
             ) : null}
 
-            <div className="flex justify-end">
-              <Button type="button" onClick={() => openCardsStep(false)} disabled={!canGoCards}>
-                논거카드 검수로 이동
-              </Button>
-            </div>
+            {isDebate && shouldUseCardsStep ? (
+              <div className="flex justify-end">
+                <Button type="button" onClick={() => openCardsStep(false)} disabled={!canGoCards}>
+                  논거카드 검수로 이동
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
-        <DebateCardsStep
-          isDebate={isDebate}
-          debateStep={debateStep}
-          isGeneratingCards={isGeneratingCards}
-          cardsReady={cardsReady}
-          argumentCards={argumentCards}
-          onOpenCardsStep={openCardsStep}
-          onSetArgumentCards={setArgumentCards}
-        />
+        {shouldUseCardsStep ? (
+          <DebateCardsStep
+            isDebate={isDebate}
+            debateStep={debateStep}
+            isGeneratingCards={isGeneratingCards}
+            cardsReady={cardsReady}
+            argumentCards={argumentCards}
+            onOpenCardsStep={openCardsStep}
+            onSetArgumentCards={setArgumentCards}
+          />
+        ) : null}
 
         <PresentationConfigStep
           isDebate={isDebate}
@@ -564,7 +610,7 @@ function CreateSessionContent() {
           onMovePresenterOrder={movePresenterOrder}
         />
 
-        {(!isDebate || debateStep === "cards") && (
+        {(!isDebate || debateStep === "cards" || (isDebate && !shouldUseCardsStep && debateStep === "headcount")) && (
           <div className="mt-2 flex flex-wrap justify-end gap-2">
             <Button size="lg" variant="outline" disabled={!canCreate} onClick={handleSaveAndExit}>
               저장

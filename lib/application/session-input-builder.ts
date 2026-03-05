@@ -31,6 +31,7 @@ type BuildSessionInputParams = {
   negativeSlots: number
   moderatorSlots: number
   selectedStudentIds: Set<string>
+  recordingStudentIds: Set<string>
   groupAssignments: Record<string, GroupAssignment>
   affirmativeStudents: Student[]
   negativeStudents: Student[]
@@ -87,6 +88,7 @@ export function buildCreateSessionInput(params: BuildSessionInputParams): Create
             negativeSlots: Math.max(0, params.negativeSlots),
             moderatorSlots: Math.max(0, params.moderatorSlots ?? 0),
             selectedStudentIds: Array.from(params.selectedStudentIds),
+            recordingStudentIds: Array.from(params.recordingStudentIds),
             groupAssignments: params.groupAssignments,
             groupSlotAdjust: params.groupSlotAdjust,
           },

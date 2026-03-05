@@ -41,6 +41,7 @@ type DebateGroupPanelProps = {
   onToggleRunning: () => void
   onPrevSpeaker: () => void
   onNextSpeaker: () => void
+  showCards: boolean
 }
 
 export function DebateGroupPanel({
@@ -75,6 +76,7 @@ export function DebateGroupPanel({
   onToggleRunning,
   onPrevSpeaker,
   onNextSpeaker,
+  showCards,
 }: DebateGroupPanelProps) {
   return (
     <div className="rounded-lg border border-border bg-card p-4">
@@ -133,6 +135,7 @@ export function DebateGroupPanel({
                 onEndSpeech={onEndSpeech}
                 debateFinished={isDebateFinished}
                 compact
+                showCards={showCards}
               />
             </div>
           ) : (
@@ -176,4 +179,3 @@ export function DebateGroupPanel({
     </div>
   )
 }
-

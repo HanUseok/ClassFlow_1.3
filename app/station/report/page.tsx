@@ -369,8 +369,12 @@ export default async function StationReportPage({
     speakerPhaseMap.get(speaker)!.set(phaseKey, log)
   }
 
-  if (speakerOrder.length === 0 && speakerNames.length > 0) {
-    speakerOrder.push(...speakerNames)
+  if (speakerNames.length > 0) {
+    for (const name of speakerNames) {
+      if (!speakerOrder.includes(name)) {
+        speakerOrder.push(name)
+      }
+    }
   }
 
   return (
@@ -474,5 +478,4 @@ export default async function StationReportPage({
     </div>
   )
 }
-
 

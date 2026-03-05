@@ -1,31 +1,38 @@
 ﻿"use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { WaitingScreen } from "@/components/station/waiting-screen"
 import { LiveDebateScreen } from "@/components/station/live-debate-screen"
 import { QuickAddScreen } from "@/components/station/quick-add-screen"
 import { DeskLayoutBoard } from "@/components/session/desk-layout-board"
+import { Button } from "@/components/ui/button"
 import { useMockSessions } from "@/hooks/use-mock-sessions"
 import { useSessionFlow } from "@/hooks/use-session-flow"
 import { listStudents } from "@/lib/application/roster-service"
 import { buildReportPayload, buildFreeModeImaginedLogs } from "@/lib/domain/session"
+import type { Student } from "@/lib/mock-data"
 
-type StationState = "landing" | "waiting" | "live"
+type StationState = "landing" | "identity" | "group" | "waiting" | "live"
 const PHASE_KEYS = ["Opening", "Rebuttal", "Rerebuttal", "FinalSummary"] as const
 type PhaseKey = (typeof PHASE_KEYS)[number]
 const STATION_FLOW_ID = "station-default-flow"
 const STATION_GROUP_COUNT = 2
-const STATION_TARGET_GROUP_INDEX = 1
 
 export default function StationPage() {
   const router = useRouter()
   const [state, setState] = useState<StationState>("landing")
-  const [placementCollapsed, setPlacementCollapsed] = useState(false)
-  const [placementCollapsing, setPlacementCollapsing] = useState(false)
+  const [selectedStudentId, setSelectedStudentId] = useState<string>("")
+  const [selectedGroupIndex, setSelectedGroupIndex] = useState(0)
+  const [isAutoFilling, setIsAutoFilling] = useState(false)
+  const [participantStartStatus, setParticipantStartStatus] = useState<"idle" | "requesting" | "ready" | "running">("idle")
+  const [participantCompletedSpeeches, setParticipantCompletedSpeeches] = useState(0)
   const { sessions, hydrated, setStatus, setDebateGroups } = useMockSessions()
   const [orderedMembers, setOrderedMembers] = useState<{ id: string; name: string; roleLabel: string }[]>([])
   const [stationGroups, setStationGroups] = useState<NonNullable<NonNullable<NonNullable<(typeof sessions)[number]["debate"]>["groups"]>>>([])
+  const autoFillTimersRef = useRef<number[]>([])
+  const participantRequestTimerRef = useRef<number | null>(null)
+  const participantReportRedirectedRef = useRef(false)
   const flow = useSessionFlow()
 
   const activeDebate = useMemo(() => {
@@ -42,7 +49,7 @@ export default function StationPage() {
   }, [sessions])
 
   const teamMembers = useMemo(() => {
-    const primaryGroup = stationGroups[STATION_TARGET_GROUP_INDEX]
+    const primaryGroup = stationGroups[selectedGroupIndex]
     const affirmative = primaryGroup?.affirmative ?? []
     const negative = primaryGroup?.negative ?? []
     const maxLength = Math.max(affirmative.length, negative.length)
@@ -55,7 +62,7 @@ export default function StationPage() {
       if (n) merged.push({ id: n.id, name: n.name, roleLabel: `반대 ${i + 1}` })
     }
     return merged
-  }, [stationGroups])
+  }, [stationGroups, selectedGroupIndex])
 
   useEffect(() => {
     if (!activeDebate || activeDebate.type !== "Debate") {
@@ -71,6 +78,7 @@ export default function StationPage() {
       moderator: undefined,
     }))
     setStationGroups(groups)
+    setSelectedGroupIndex((prev) => Math.max(0, Math.min(prev, groups.length - 1)))
   }, [activeDebate?.id])
 
   useEffect(() => {
@@ -110,16 +118,14 @@ export default function StationPage() {
     return roster
   }, [activeDebate])
 
-  const unassignedPlacementStudents = useMemo(() => {
-    const assigned = new Set(
-      stationGroups.flatMap((group) => [
-        ...group.affirmative.map((student) => student.id),
-        ...group.negative.map((student) => student.id),
-        ...(group.moderator ? [group.moderator.id] : []),
-      ])
-    )
-    return placementCandidates.filter((student) => !assigned.has(student.id))
-  }, [stationGroups, placementCandidates])
+  const selectedStudent = useMemo(
+    () => placementCandidates.find((student) => student.id === selectedStudentId),
+    [placementCandidates, selectedStudentId]
+  )
+  const selectedMemberIndex = useMemo(
+    () => orderedMembers.findIndex((member) => member.id === selectedStudentId),
+    [orderedMembers, selectedStudentId]
+  )
 
   const placementStatus = useMemo(() => {
     if (!activeDebate || activeDebate.type !== "Debate") return []
@@ -139,7 +145,7 @@ export default function StationPage() {
     })
   }, [activeDebate, stationGroups])
 
-  const currentPlacementGroupIndex = Math.min(STATION_TARGET_GROUP_INDEX, Math.max(0, stationGroups.length - 1))
+  const currentPlacementGroupIndex = Math.min(selectedGroupIndex, Math.max(0, stationGroups.length - 1))
   const currentPlacementGroupNumber = currentPlacementGroupIndex + 1
 
   const deskPlacementGroups = useMemo(() => {
@@ -156,27 +162,118 @@ export default function StationPage() {
     }))
   }, [deskPlacementGroups])
 
-  const canStartFromDesk = deskPlacementGroups.every((group) => group.affirmative.length >= 1 && group.negative.length >= 1 && Boolean(group.moderator))
+  const currentPlacementGroup = stationGroups[currentPlacementGroupIndex]
+  const isCurrentUserModerator = Boolean(selectedStudentId && currentPlacementGroup?.moderator?.id === selectedStudentId)
+  const isCurrentSpeakerSelf = Boolean(selectedStudentId && orderedMembers[currentSpeakerIndex]?.id === selectedStudentId)
+  const participantSpeakerIndex =
+    debateMode === "Free" && !isCurrentUserModerator && selectedMemberIndex >= 0 ? selectedMemberIndex : currentSpeakerIndex
+  const isParticipantRecordingEnabled = useMemo(() => {
+    const configured = activeDebate?.debate?.assignmentConfig?.recordingStudentIds
+    if (!configured || configured.length === 0) return true
+    return configured.includes(selectedStudentId)
+  }, [activeDebate?.debate?.assignmentConfig?.recordingStudentIds, selectedStudentId])
+  const isSelectedStudentPlacedInCurrentGroup = Boolean(
+    selectedStudent &&
+      currentPlacementGroup &&
+      (currentPlacementGroup.affirmative.some((student) => student.id === selectedStudent.id) ||
+        currentPlacementGroup.negative.some((student) => student.id === selectedStudent.id) ||
+        currentPlacementGroup.moderator?.id === selectedStudent.id)
+  )
+  const selfPlacementPool = selectedStudent && !isSelectedStudentPlacedInCurrentGroup ? [selectedStudent] : []
   const isDebateFinished = flow.isDebateFinished(STATION_FLOW_ID, orderedMembers.length, debateMode)
 
-  const goLiveFromWaiting = () => {
+  const goLiveFromWaiting = (groupsOverride?: typeof stationGroups) => {
     if (!activeDebate) return
-    setDebateGroups(activeDebate.id, stationGroups)
+    setDebateGroups(activeDebate.id, groupsOverride ?? stationGroups)
     setState("live")
   }
 
   useEffect(() => {
-    setPlacementCollapsed(false)
-    setPlacementCollapsing(false)
+    setIsAutoFilling(false)
+    setParticipantStartStatus("idle")
+    setParticipantCompletedSpeeches(0)
+    participantReportRedirectedRef.current = false
+    autoFillTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    autoFillTimersRef.current = []
+    if (participantRequestTimerRef.current) {
+      window.clearTimeout(participantRequestTimerRef.current)
+      participantRequestTimerRef.current = null
+    }
   }, [activeDebate?.id])
 
   useEffect(() => {
+    return () => {
+      autoFillTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      autoFillTimersRef.current = []
+      if (participantRequestTimerRef.current) {
+        window.clearTimeout(participantRequestTimerRef.current)
+        participantRequestTimerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    setParticipantCompletedSpeeches(0)
+  }, [selectedStudentId])
+
+  useEffect(() => {
+    if (isCurrentUserModerator) return
+    if (!isSpeechRunning && participantStartStatus === "running") {
+      setParticipantStartStatus("idle")
+    }
+  }, [isSpeechRunning, participantStartStatus, isCurrentUserModerator])
+
+  useEffect(() => {
+    if (state !== "live") return
+    if (isCurrentUserModerator) return
+    if (debateMode !== "Ordered") return
+    if (isCurrentSpeakerSelf) return
+    if (orderedMembers.length <= 0) return
+
+    const timer = window.setTimeout(() => {
+      flow.handleEndSpeech(STATION_FLOW_ID, orderedMembers.length, debateMode)
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [state, isCurrentUserModerator, debateMode, isCurrentSpeakerSelf, orderedMembers.length, flow])
+
+  useEffect(() => {
+    if (state !== "live") return
+    if (isCurrentUserModerator) return
     if (!activeDebate) return
-    if (state !== "waiting") return
-    if (!placementCollapsed) return
-    const autoTimer = window.setTimeout(() => goLiveFromWaiting(), 5000)
-    return () => window.clearTimeout(autoTimer)
-  }, [placementCollapsed, activeDebate?.id, state])
+    const orderedFinished = debateMode === "Ordered" && isDebateFinished
+    const freeReachedLimit = debateMode === "Free" && participantCompletedSpeeches >= 3
+    const shouldRedirect = activeDebate.status === "Ended" || orderedFinished || freeReachedLimit
+    if (!shouldRedirect) return
+    if (participantReportRedirectedRef.current) return
+
+    if (orderedFinished && activeDebate.status !== "Ended") {
+      setStatus(activeDebate.id, "Ended")
+    }
+    const participantName =
+      selectedStudent?.name ||
+      orderedMembers.find((member) => member.id === selectedStudentId)?.name ||
+      "참여자"
+    const reportPath = buildReportPayload({
+      names: [participantName],
+      round: 1,
+      phase: debateMode === "Free" ? "자유토론" : "마무리",
+      logs: [],
+      sessionId: activeDebate.id,
+      teacherGuided: activeDebate.debate?.teacherGuided ?? false,
+      sessionTitle: `${activeDebate.title} - 개인 점검`,
+      sessionStatus: "Ended",
+      groupCount: 1,
+      groupLayout: JSON.stringify([
+        {
+          affirmative: [],
+          negative: [],
+        },
+      ]),
+    })
+    participantReportRedirectedRef.current = true
+    router.push(`${reportPath}&source=station`)
+  }, [state, isCurrentUserModerator, activeDebate, selectedStudent, orderedMembers, selectedStudentId, debateMode, isDebateFinished, participantCompletedSpeeches, router, setStatus])
 
   const moveOrderTo = (from: number, to: number) => {
     setOrderedMembers((prev) => {
@@ -248,133 +345,158 @@ export default function StationPage() {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm font-semibold text-foreground">세션 대기실</p>
-              <p className="text-xs text-muted-foreground">{requiresDeskPlacement ? `${currentPlacementGroupNumber}조 배치 완료 후 다음 단계로 전환됩니다.` : "조배치 없이 5초 후 자동으로 시작됩니다."}</p>
+              <p className="text-xs text-muted-foreground">
+                {isAutoFilling ? "다른 좌석을 자동으로 배치 중입니다..." : `${currentPlacementGroupNumber}조에서 내 자리를 배치하세요.`}
+              </p>
             </div>
-            {requiresDeskPlacement && !placementCollapsed ? (
-              <button
-                type="button"
-                onClick={() => {
-                  if (!canStartFromDesk) return
-                  setPlacementCollapsing(true)
-                  window.setTimeout(() => {
-                    setPlacementCollapsed(true)
-                    setPlacementCollapsing(false)
-                  }, 220)
-                }}
-                disabled={!canStartFromDesk}
-                className="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
-              >
-                {currentPlacementGroupNumber}조 배치 완료
-              </button>
-            ) : null}
           </div>
 
-          {requiresDeskPlacement && !placementCollapsed ? (
-            <div
-              className={`origin-right transition-all duration-200 ${
-                placementCollapsing ? "translate-x-8 scale-[0.92] opacity-70" : "translate-x-0 scale-100 opacity-100"
-              }`}
-            >
-              <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
-                <DeskLayoutBoard
-                  groups={deskPlacementGroups}
-                  poolStudents={unassignedPlacementStudents}
-                  seatConfigByGroup={placementSeatConfig}
-                  startGroupNumber={currentPlacementGroupNumber}
-                  onChange={(nextGroups) => {
-                    const merged = [...stationGroups]
-                    if (nextGroups[0]) merged[currentPlacementGroupIndex] = nextGroups[0]
-                    setStationGroups(merged)
+          <div className="grid gap-3">
+            <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/50 p-3">
+              <p className="mb-2 text-xs font-semibold text-amber-800">내 이름 카드</p>
+              {selectedStudent ? (
+                <button
+                  key={selectedStudent.id}
+                  type="button"
+                  draggable={!isAutoFilling}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData("application/json", JSON.stringify({ kind: "pool", studentId: selectedStudent.id }))
                   }}
-                />
-                <div
-                  className="rounded-lg border border-dashed border-amber-300 bg-amber-50/60 p-3"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    const raw = event.dataTransfer.getData("application/json")
-                    if (!raw) return
-                    try {
-                      const parsed = JSON.parse(raw) as { kind: "seat"; groupIndex: number; side: "affirmative" | "negative" | "moderator"; index: number }
-                      if (parsed.kind !== "seat") return
-                      const merged = [...stationGroups]
-                      const targetIndex = currentPlacementGroupIndex
-                      const target = merged[targetIndex]
-                      if (!target) return
-                      if (parsed.side === "affirmative") {
-                        const nextAff = [...target.affirmative]
-                        nextAff.splice(parsed.index, 1)
-                        merged[targetIndex] = { ...target, affirmative: nextAff }
-                      } else if (parsed.side === "negative") {
-                        const nextNeg = [...target.negative]
-                        nextNeg.splice(parsed.index, 1)
-                        merged[targetIndex] = { ...target, negative: nextNeg }
-                      } else if (parsed.side === "moderator" && parsed.index === 0) {
-                        merged[targetIndex] = { ...target, moderator: undefined }
-                      }
-                      setStationGroups(merged)
-                    } catch {
-                      // ignore malformed payload
-                    }
-                  }}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-xs disabled:opacity-50"
+                  disabled={isAutoFilling || isSelectedStudentPlacedInCurrentGroup}
                 >
-                  <p className="mb-2 text-sm font-semibold text-amber-800">미배치 인원 ({unassignedPlacementStudents.length}명)</p>
-                  <div className="flex flex-wrap gap-2">
-                    {unassignedPlacementStudents.length > 0 ? (
-                      unassignedPlacementStudents.map((student) => (
-                        <button
-                          key={student.id}
-                          type="button"
-                          draggable
-                          onDragStart={(event) => {
-                            event.dataTransfer.setData("application/json", JSON.stringify({ kind: "pool", studentId: student.id }))
-                          }}
-                          className="rounded-md border border-border bg-background px-3 py-1.5 text-xs"
-                        >
-                          {student.name}
-                        </button>
-                      ))
-                    ) : (
-                      <span className="text-xs text-muted-foreground">미배치 인원이 없습니다.</span>
-                    )}
-                  </div>
-                </div>
-              </div>
+                  {selectedStudent.name}
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground">이름 선택으로 돌아가서 학생을 선택하세요.</span>
+              )}
             </div>
-          ) : (
-            <div className="grid gap-3">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {placementStatus.map((status, index) => {
-                  const done = placementCollapsed ? true : index === 0 ? true : status.done
-                  const displayPlaced = index === 0 ? status.requiredTotal : status.placedTotal
-                  return (
-                    <div
-                      key={status.groupId}
-                      className={`origin-right flex min-h-[220px] flex-col justify-between rounded-lg px-3 py-2 transition-all duration-300 ${
-                        done ? "border border-emerald-200 bg-emerald-50" : "border border-border"
-                      }`}
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{status.label} 배치 상태</p>
-                        <p className="text-xs text-muted-foreground">
-                          {displayPlaced}/{status.requiredTotal} 배치
-                        </p>
-                      </div>
-                      <p className={`text-xs font-semibold ${done ? "text-emerald-600" : "text-amber-600"}`}>
-                        {done ? "완료" : "진행 중"}
-                      </p>
-                    </div>
+
+            <DeskLayoutBoard
+              groups={deskPlacementGroups}
+              poolStudents={selfPlacementPool}
+              seatConfigByGroup={placementSeatConfig}
+              startGroupNumber={currentPlacementGroupNumber}
+              onChange={(nextGroups) => {
+                if (isAutoFilling) return
+                const merged = [...stationGroups]
+                const nextGroup = nextGroups[0]
+                if (!nextGroup) return
+
+                const wasPlaced = Boolean(
+                  selectedStudent &&
+                    currentPlacementGroup &&
+                    (currentPlacementGroup.affirmative.some((student) => student.id === selectedStudent.id) ||
+                      currentPlacementGroup.negative.some((student) => student.id === selectedStudent.id) ||
+                      currentPlacementGroup.moderator?.id === selectedStudent.id)
+                )
+
+                const nowPlaced = Boolean(
+                  selectedStudent &&
+                    (nextGroup.affirmative.some((student) => student.id === selectedStudent.id) ||
+                      nextGroup.negative.some((student) => student.id === selectedStudent.id) ||
+                      nextGroup.moderator?.id === selectedStudent.id)
+                )
+
+                merged[currentPlacementGroupIndex] = nextGroup
+                setStationGroups(merged)
+
+                if (!wasPlaced && nowPlaced) {
+                  const seatCfg = placementSeatConfig[0] ?? { affirmative: 2, negative: 2, moderator: 1 }
+                  const assignedIds = new Set(
+                    merged.flatMap((group, index) =>
+                      index === currentPlacementGroupIndex
+                        ? []
+                        : [
+                            ...group.affirmative.map((student) => student.id),
+                            ...group.negative.map((student) => student.id),
+                            ...(group.moderator ? [group.moderator.id] : []),
+                          ]
+                    )
                   )
-                })}
-              </div>
-              <p className="text-xs text-muted-foreground">5초 후 자동으로 진행 화면으로 이동합니다.</p>
-            </div>
-          )}
+                  const currentIds = new Set([
+                    ...nextGroup.affirmative.map((student) => student.id),
+                    ...nextGroup.negative.map((student) => student.id),
+                    ...(nextGroup.moderator ? [nextGroup.moderator.id] : []),
+                  ])
+                  const autoFillCandidates = placementCandidates.filter(
+                    (student) => !assignedIds.has(student.id) && !currentIds.has(student.id)
+                  )
+
+                  const steps: Array<{ side: "affirmative" | "negative" | "moderator"; student: Student }> = []
+                  let cursor = 0
+                  const pick = () => {
+                    const picked = autoFillCandidates[cursor]
+                    cursor += 1
+                    return picked
+                  }
+                  for (let i = nextGroup.affirmative.length; i < seatCfg.affirmative; i += 1) {
+                    const picked = pick()
+                    if (!picked) break
+                    steps.push({ side: "affirmative", student: picked })
+                  }
+                  for (let i = nextGroup.negative.length; i < seatCfg.negative; i += 1) {
+                    const picked = pick()
+                    if (!picked) break
+                    steps.push({ side: "negative", student: picked })
+                  }
+                  if (seatCfg.moderator > 0 && !nextGroup.moderator) {
+                    const picked = pick()
+                    if (picked) steps.push({ side: "moderator", student: picked })
+                  }
+
+                  if (steps.length === 0) {
+                    goLiveFromWaiting(merged)
+                    return
+                  }
+
+                  setIsAutoFilling(true)
+                  const intervalMs = 900
+                  const finalMerged = [...merged]
+                  const finalGroup = { ...nextGroup, affirmative: [...nextGroup.affirmative], negative: [...nextGroup.negative] }
+
+                  autoFillTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+                  autoFillTimersRef.current = []
+
+                  steps.forEach((step, stepIndex) => {
+                    const timer = window.setTimeout(() => {
+                      setStationGroups((prev) => {
+                        const next = [...prev]
+                        const target = next[currentPlacementGroupIndex]
+                        if (!target) return prev
+                        if (step.side === "affirmative") {
+                          next[currentPlacementGroupIndex] = { ...target, affirmative: [...target.affirmative, step.student] }
+                        } else if (step.side === "negative") {
+                          next[currentPlacementGroupIndex] = { ...target, negative: [...target.negative, step.student] }
+                        } else {
+                          next[currentPlacementGroupIndex] = { ...target, moderator: step.student }
+                        }
+                        return next
+                      })
+                    }, (stepIndex + 1) * intervalMs)
+                    autoFillTimersRef.current.push(timer)
+
+                    if (step.side === "affirmative") finalGroup.affirmative.push(step.student)
+                    else if (step.side === "negative") finalGroup.negative.push(step.student)
+                    else finalGroup.moderator = step.student
+                  })
+
+                  finalMerged[currentPlacementGroupIndex] = finalGroup
+                  const completeTimer = window.setTimeout(() => {
+                    setIsAutoFilling(false)
+                    goLiveFromWaiting(finalMerged)
+                  }, (steps.length + 1) * intervalMs)
+                  autoFillTimersRef.current.push(completeTimer)
+                }
+              }}
+            />
+          </div>
         </div>
       ) : null}
 
       {state === "landing" && (
         <WaitingScreen
-          onJoin={() => setState("waiting")}
+          onJoin={() => setState("identity")}
           sessionInfo={{
             topic: activeDebate.topic ?? "No topic",
             teacherName: "Teacher",
@@ -385,6 +507,72 @@ export default function StationPage() {
         />
       )}
 
+      {state === "identity" ? (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="text-sm font-semibold text-foreground">이름 선택</p>
+          <p className="mt-1 text-xs text-muted-foreground">입장할 학생 이름을 선택하세요.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {placementCandidates.map((student) => (
+              <button
+                key={student.id}
+                type="button"
+                onClick={() => setSelectedStudentId(student.id)}
+                className={`rounded-md border px-3 py-2 text-left text-sm transition ${
+                  selectedStudentId === student.id
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border bg-background text-foreground hover:bg-accent"
+                }`}
+              >
+                {student.name}
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setState("landing")}>
+              이전
+            </Button>
+            <Button disabled={!selectedStudentId} onClick={() => setState("group")}>
+              다음
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {state === "group" ? (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="text-sm font-semibold text-foreground">조 선택</p>
+          <p className="mt-1 text-xs text-muted-foreground">조 배치 상태를 보고 참가할 조를 선택하세요.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {placementStatus.map((status, index) => (
+              <button
+                key={status.groupId}
+                type="button"
+                onClick={() => {
+                  setSelectedGroupIndex(index)
+                  setState("waiting")
+                }}
+                className={`rounded-lg border px-3 py-2 text-left transition ${
+                  index === currentPlacementGroupIndex ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-accent"
+                }`}
+              >
+                <p className="text-sm font-medium text-foreground">{status.label}</p>
+                <p className="text-xs text-muted-foreground">
+                  {status.placedTotal}/{status.requiredTotal} 배치
+                </p>
+                <p className={`mt-1 text-xs font-semibold ${status.done ? "text-emerald-600" : "text-amber-600"}`}>
+                  {status.done ? "완료" : "진행 중"}
+                </p>
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setState("identity")}>
+              이전
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {state === "live" && (
         <div className="flex flex-col gap-4">
           <LiveDebateScreen
@@ -394,11 +582,12 @@ export default function StationPage() {
             isSpeechRunning={isSpeechRunning}
             debateMode={debateMode}
             teamMembers={orderedMembers}
-            currentSpeakerIndex={currentSpeakerIndex}
+            currentSpeakerIndex={participantSpeakerIndex}
             onEndDebate={handleEndDebate}
             onMoveOrderTo={moveOrderTo}
             onSelectSpeaker={handleSelectSpeaker}
             onPhaseChange={handlePhaseChange}
+            interactionDisabled={!isCurrentUserModerator}
           />
           <QuickAddScreen
             round={1}
@@ -407,13 +596,62 @@ export default function StationPage() {
             recordLimitPerRound={6}
             debateMode={debateMode}
             teamMembers={orderedMembers}
-            currentSpeaker={orderedMembers[currentSpeakerIndex]}
+            currentSpeaker={orderedMembers[participantSpeakerIndex]}
             onStartSpeech={() => {
-              flow.setSpeechRunning(STATION_FLOW_ID, true)
+              if (isCurrentUserModerator) {
+                flow.setSpeechRunning(STATION_FLOW_ID, true)
+                return
+              }
+              if (debateMode === "Ordered") {
+                if (!isCurrentSpeakerSelf) return
+                flow.setSpeechRunning(STATION_FLOW_ID, true)
+                setParticipantStartStatus("running")
+                return
+              }
+              if (participantStartStatus === "idle") {
+                if (selectedMemberIndex >= 0) {
+                  flow.setGroupSpeakerIndex(STATION_FLOW_ID, selectedMemberIndex)
+                }
+                setParticipantStartStatus("requesting")
+                participantRequestTimerRef.current = window.setTimeout(() => {
+                  setParticipantStartStatus("ready")
+                  participantRequestTimerRef.current = null
+                }, 3000)
+                return
+              }
+
+              if (participantStartStatus === "ready") {
+                if (selectedMemberIndex >= 0) {
+                  flow.setGroupSpeakerIndex(STATION_FLOW_ID, selectedMemberIndex)
+                }
+                flow.setSpeechRunning(STATION_FLOW_ID, true)
+                setParticipantStartStatus("running")
+              }
             }}
-            onEndSpeech={() => flow.handleEndSpeech(STATION_FLOW_ID, orderedMembers.length, debateMode)}
+            onEndSpeech={() => {
+              if (isCurrentUserModerator) {
+                flow.handleEndSpeech(STATION_FLOW_ID, orderedMembers.length, debateMode)
+                return
+              }
+              if (participantStartStatus !== "running") return
+              if (debateMode === "Free") {
+                flow.setSpeechRunning(STATION_FLOW_ID, false)
+                setParticipantStartStatus("idle")
+                setParticipantCompletedSpeeches((prev) => prev + 1)
+                return
+              }
+              flow.handleEndSpeech(STATION_FLOW_ID, orderedMembers.length, debateMode)
+              setParticipantStartStatus("idle")
+            }}
             debateFinished={isDebateFinished}
             compact
+            startOnlyMode={!isCurrentUserModerator}
+            speechRunning={isCurrentUserModerator ? isSpeechRunning : participantStartStatus === "running"}
+            startOnlyStatus={isCurrentUserModerator ? "idle" : participantStartStatus}
+            participantCanStart={isCurrentUserModerator ? true : debateMode === "Free" ? true : isCurrentSpeakerSelf}
+            participantUseRequestFlow={!isCurrentUserModerator && debateMode === "Free"}
+            participantRecordingEnabled={isParticipantRecordingEnabled}
+            showCards={!isCurrentUserModerator && !isParticipantRecordingEnabled}
           />
         </div>
       )}

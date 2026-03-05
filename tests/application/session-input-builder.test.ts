@@ -25,6 +25,7 @@ describe("buildCreateSessionInput", () => {
       negativeSlots: 2,
       moderatorSlots: 1,
       selectedStudentIds: new Set(["s1", "s2", "m1"]),
+      recordingStudentIds: new Set(["s1"]),
       groupAssignments: {
         "group-1": { affirmative: ["s1", null], negative: ["s2", null], moderator: ["m1"] },
       },
@@ -59,6 +60,7 @@ describe("buildCreateSessionInput", () => {
     expect(input.debate?.argumentCards?.[0].title).toBe("card")
     expect(input.teams?.team1[0].id).toBe("s1")
     expect(input.debate?.assignmentConfig?.groupAssignments?.["group-1"]?.affirmative).toEqual(["s1", null])
+    expect(input.debate?.assignmentConfig?.recordingStudentIds).toEqual(["s1"])
   })
 
   it("builds presentation payload with presenter seconds", () => {
@@ -74,6 +76,7 @@ describe("buildCreateSessionInput", () => {
       negativeSlots: 0,
       moderatorSlots: 0,
       selectedStudentIds: new Set(["s1"]),
+      recordingStudentIds: new Set(["s1"]),
       groupAssignments: {},
       affirmativeStudents: [],
       negativeStudents: [],

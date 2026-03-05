@@ -36,7 +36,7 @@ export function SessionDetailPageContent() {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [endedByDebateClose, setEndedByDebateClose] = useState(false)
   const [viewMode, setViewMode] = useState<"progress" | "manage">("progress")
-  const [placementCollapsed, setPlacementCollapsed] = useState(false)
+  const [placementCollapsed, setPlacementCollapsed] = useState(true)
   const [placementCollapsing, setPlacementCollapsing] = useState(false)
   const [autoDoneGroupCount, setAutoDoneGroupCount] = useState(0)
   const flow = useSessionFlow()
@@ -68,7 +68,38 @@ export function SessionDetailPageContent() {
   }, [session?.id, session?.type, session?.status, session?.debate?.teacherGuided])
 
   useEffect(() => {
-    setPlacementCollapsed(false)
+    if (!session || session.type !== "Debate") return
+    if (!isTeacherGuided || viewMode !== "progress") return
+    const firstGroup = debateGroups[0]
+    if (!firstGroup) return
+
+    const alreadyFilled = firstGroup.affirmative.length > 0 || firstGroup.negative.length > 0
+    if (alreadyFilled) return
+
+    const roster = listStudents().filter((student) => student.classId === session.classId)
+    const fallbackTeamPool = [...(session.teams?.team1 ?? []), ...(session.teams?.team2 ?? [])]
+    const globalRoster = listStudents()
+    const selectedIds = session.debate?.assignmentConfig?.selectedStudentIds ?? []
+    const source = selectedIds.length > 0 ? roster.filter((student) => selectedIds.includes(student.id)) : roster
+    const sourceWithFallback =
+      source.length > 0 ? source : fallbackTeamPool.length > 0 ? fallbackTeamPool : globalRoster
+    if (sourceWithFallback.length === 0) return
+
+    const picked = sourceWithFallback.slice(0, 4)
+    if (picked.length === 0) return
+
+    const nextGroups = [...debateGroups]
+    nextGroups[0] = {
+      ...firstGroup,
+      affirmative: picked.filter((_, idx) => idx % 2 === 0),
+      negative: picked.filter((_, idx) => idx % 2 === 1),
+      moderator: firstGroup.moderator,
+    }
+    setDebateGroups(session.id, nextGroups)
+  }, [session, isTeacherGuided, viewMode, debateGroups, setDebateGroups])
+
+  useEffect(() => {
+    setPlacementCollapsed(true)
     setPlacementCollapsing(false)
     setAutoDoneGroupCount(0)
   }, [session?.id, session?.status])
@@ -271,7 +302,24 @@ export function SessionDetailPageContent() {
                 return <p className="text-sm text-muted-foreground">1조 데이터가 없습니다.</p>
               }
 
-	              const teamMembers = mergeGroupMembers(group)
+	              const mergedTeamMembers = mergeGroupMembers(group)
+	              const fallbackSeed = [
+	                ...(session.teams?.team1 ?? []),
+	                ...(session.teams?.team2 ?? []),
+	                ...listStudents(),
+	              ]
+	              const dedupedFallbackSeed = Array.from(new Map(fallbackSeed.map((student) => [student.id, student])).values())
+	              const fallbackTeamMembers = dedupedFallbackSeed
+	                .slice(0, 4)
+	                .map((student, idx) => ({
+	                  id: student.id,
+	                  name: student.name,
+	                  roleLabel: idx % 2 === 0 ? `찬성 ${Math.floor(idx / 2) + 1}` : `반대 ${Math.floor(idx / 2) + 1}`,
+	                }))
+	              const teamMembers = mergedTeamMembers.length > 0 ? mergedTeamMembers : fallbackTeamMembers
+	              const recordingIds = session.debate?.assignmentConfig?.recordingStudentIds ?? []
+	              const hasAnyNonRecordingMemberInGroup =
+	                recordingIds.length > 0 && teamMembers.some((member) => !recordingIds.includes(member.id))
 	              const groupState = flow.getGroupState(group.id)
 	              const phase = groupState.phase
 	              const currentIndexRaw = groupState.currentSpeakerIndex
@@ -331,6 +379,7 @@ export function SessionDetailPageContent() {
 	                      }}
 	                      debateFinished={isDebateFinished}
 	                      compact
+                        showCards={hasAnyNonRecordingMemberInGroup}
                     />
                   ) : (
                     <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/30 p-3">
@@ -581,6 +630,9 @@ export function SessionDetailPageContent() {
 	              const firstSpeaker = group.affirmative[0]?.name ?? group.negative[0]?.name ?? "-"
 	              const isOpen = Boolean(openGroups[group.id])
 	              const teamMembers = mergeGroupMembers(group)
+                const recordingIds = session.debate?.assignmentConfig?.recordingStudentIds ?? []
+                const hasAnyNonRecordingMemberInGroup =
+                  recordingIds.length > 0 && teamMembers.some((member) => !recordingIds.includes(member.id))
 	              const groupState = flow.getGroupState(group.id)
 	              const phase = groupState.phase
 	              const currentIndexRaw = groupState.currentSpeakerIndex
@@ -647,6 +699,7 @@ export function SessionDetailPageContent() {
 	                  }}
 	                  onPrevSpeaker={() => flow.goPrev(group.id, teamMembers.length)}
 	                  onNextSpeaker={() => flow.goNext(group.id, teamMembers.length)}
+                    showCards={hasAnyNonRecordingMemberInGroup}
 	                />
 	              )
 	            })}

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Eye, FileText, Lock, Play, Save } from "lucide-react"
+import { Eye, FileText, Hand, Lock, Mic, MicOff, Play } from "lucide-react"
 import { buildSessionReportPath, saveSpeech } from "@/lib/application/session-service"
 
 interface QuickAddScreenProps {
@@ -32,6 +32,13 @@ interface QuickAddScreenProps {
   onEndSpeech?: () => void
   debateFinished?: boolean
   compact?: boolean
+  startOnlyMode?: boolean
+  speechRunning?: boolean
+  startOnlyStatus?: "idle" | "requesting" | "ready" | "running"
+  participantCanStart?: boolean
+  participantUseRequestFlow?: boolean
+  participantRecordingEnabled?: boolean
+  showCards?: boolean
 }
 
 type SlotKey = "argument" | "accidentType"
@@ -194,8 +201,17 @@ export function QuickAddScreen({
   onStartSpeech,
   onEndSpeech,
   debateFinished,
+  startOnlyMode = false,
+  speechRunning = false,
+  startOnlyStatus = "idle",
+  participantCanStart = true,
+  participantUseRequestFlow = true,
+  participantRecordingEnabled = true,
+  showCards = true,
 }: QuickAddScreenProps) {
   const [isRunning, setIsRunning] = useState(false)
+  const [isGranting, setIsGranting] = useState(false)
+  const [cardsVisible, setCardsVisible] = useState(true)
   const [activeSlot, setActiveSlot] = useState<SlotKey>("argument")
   const [panelOpen, setPanelOpen] = useState(false)
   const [equipped, setEquipped] = useState<{ argument: string | null; accidentType: string | null }>({
@@ -215,11 +231,44 @@ export function QuickAddScreen({
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewTransform, setPreviewTransform] = useState({ x: 0, y: 0, sx: 1, sy: 1 })
   const [speechHistory, setSpeechHistory] = useState<SpeechHistoryItem[]>([])
+  const grantTimerRef = useRef<number | null>(null)
   const argumentSlotRef = useRef<HTMLDivElement | null>(null)
   const accidentSlotRef = useRef<HTMLDivElement | null>(null)
   const argumentHandRef = useRef<HTMLDivElement | null>(null)
   const accidentHandRef = useRef<HTMLDivElement | null>(null)
   const isFreeMode = debateMode === "Free"
+  const showRunningPanel =
+    (!startOnlyMode && isRunning) ||
+    (startOnlyMode && speechRunning && !participantRecordingEnabled)
+  const showStartPanel = true
+  const startButtonDisabled = startOnlyMode
+    ? startOnlyStatus === "requesting" || (!participantCanStart && startOnlyStatus !== "running")
+    : isRunning || isGranting
+  const startPanelHidden = (!startOnlyMode && isRunning) || (startOnlyMode && showRunningPanel)
+  const nonRecordingParticipantMode = startOnlyMode && !participantRecordingEnabled
+  const startOnlyButtonLabel =
+    !participantCanStart && startOnlyStatus !== "running"
+      ? "다른 사람 말하는 중"
+      : startOnlyStatus === "running"
+        ? "발언 종료"
+        : !participantUseRequestFlow
+          ? "발언 시작"
+          : startOnlyStatus === "requesting"
+            ? "발언 요청 중..."
+            : startOnlyStatus === "ready"
+              ? "발언 시작 가능"
+              : "발언 요청"
+  const startButtonClassName = startOnlyMode
+    ? startOnlyStatus === "running"
+      ? "h-[300px] w-full gap-3 rounded-2xl bg-rose-600 text-xl font-bold text-white transition-all duration-500 hover:bg-rose-700"
+      : participantUseRequestFlow && startOnlyStatus === "idle"
+        ? "h-[300px] w-full gap-3 rounded-2xl bg-slate-400 text-xl font-bold text-white transition-all duration-500 hover:bg-slate-500"
+      : !participantCanStart
+        ? "h-[300px] w-full gap-3 rounded-2xl bg-slate-400 text-xl font-bold text-white transition-all duration-500 hover:bg-slate-500"
+        : nonRecordingParticipantMode
+          ? "h-[300px] w-full gap-3 rounded-2xl bg-amber-600 text-xl font-bold text-white transition-all duration-500 hover:bg-amber-700"
+        : "h-[300px] w-full gap-3 rounded-2xl bg-emerald-600 text-xl font-bold text-white transition-all duration-500 hover:bg-emerald-700"
+    : "h-[300px] w-full gap-3 rounded-2xl bg-emerald-600 text-xl font-bold text-white transition-all duration-500 hover:bg-emerald-700"
 
   useEffect(() => {
     if (isFreeMode) {
@@ -227,6 +276,33 @@ export function QuickAddScreen({
       setIsRunning(false)
     }
   }, [isFreeMode])
+
+  useEffect(() => {
+    if (showCards) {
+      setCardsVisible(true)
+      return
+    }
+    setCardsVisible(false)
+  }, [showCards])
+
+  useEffect(() => {
+    return () => {
+      if (grantTimerRef.current) {
+        window.clearTimeout(grantTimerRef.current)
+        grantTimerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (startOnlyMode) return
+    if (grantTimerRef.current) {
+      window.clearTimeout(grantTimerRef.current)
+      grantTimerRef.current = null
+    }
+    setIsGranting(false)
+    setIsRunning(false)
+  }, [startOnlyMode, debateMode, phase, currentSpeaker?.id])
 
   const argumentCardDeck = useMemo(() => {
     if (!argumentCards || argumentCards.length === 0) return ARGUMENT_CARDS
@@ -539,6 +615,7 @@ export function QuickAddScreen({
     )
 
     setIsRunning(false)
+    setIsGranting(false)
     setPanelOpen(isFreeMode)
     setEquipped({ argument: null, accidentType: null })
     closePreview()
@@ -553,29 +630,39 @@ export function QuickAddScreen({
         <div className="rounded-2xl border border-slate-300 bg-white/90 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span />
-            <span className="text-sm font-bold tabular-nums text-slate-700">세팅 {formatClock(durationSeconds)}</span>
+            <span />
           </div>
 
-          {isRunning || isFreeMode ? (
+          {showRunningPanel ? (
             <Button
               size="lg"
-              className={`w-full gap-2 text-white ${isFreeMode ? "bg-sky-600 hover:bg-sky-700" : "bg-rose-600 hover:bg-rose-700"}`}
+              className={
+                startOnlyMode
+                  ? showCards && !cardsVisible
+                    ? nonRecordingParticipantMode
+                      ? "h-[300px] w-full gap-3 rounded-2xl bg-amber-700 text-xl font-bold text-white transition-all duration-500 hover:bg-amber-800"
+                      : "h-[300px] w-full gap-3 rounded-2xl bg-rose-600 text-xl font-bold text-white transition-all duration-500 hover:bg-rose-700"
+                    : nonRecordingParticipantMode
+                      ? "w-full gap-2 bg-amber-700 text-white hover:bg-amber-800"
+                      : "w-full gap-2 bg-rose-600 text-white hover:bg-rose-700"
+                  : "h-[300px] w-full gap-3 rounded-2xl bg-rose-600 text-xl font-bold text-white transition-all duration-500 hover:bg-rose-700"
+              }
               onClick={handleEndSpeech}
             >
-              {isFreeMode ? <Save className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-              {isFreeMode ? "발언 저장" : "발언 종료"}
+              {isFreeMode ? <MicOff className="h-7 w-7" /> : <Lock className="h-4 w-4" />}
+              {isFreeMode ? "발언 종료" : "발언 중지"}
             </Button>
           ) : null}
 
-          {!isFreeMode ? (
+          {showStartPanel ? (
             <div
               className={`origin-top transition-all duration-500 ease-out ${
-                isRunning
+                startPanelHidden
                   ? "pointer-events-none max-h-0 -translate-y-6 scale-90 overflow-hidden opacity-0"
                   : "mt-3 max-h-[360px] translate-y-0 scale-100 opacity-100"
               }`}
             >
-              {debateFinished ? (
+              {debateFinished && !startOnlyMode && !isFreeMode ? (
                 <Button
                   size="lg"
                   className="h-[300px] w-full gap-3 rounded-2xl bg-slate-800 text-xl font-bold text-white transition-all duration-500 hover:bg-slate-900"
@@ -602,22 +689,60 @@ export function QuickAddScreen({
               ) : (
                 <Button
                   size="lg"
-                  className="h-[300px] w-full gap-3 rounded-2xl bg-emerald-600 text-xl font-bold text-white transition-all duration-500 hover:bg-emerald-700"
+                  className={startButtonClassName}
                   onClick={() => {
-                    setIsRunning(true)
-                    onStartSpeech?.()
+                    if (startOnlyMode) {
+                      if (startOnlyStatus === "running") onEndSpeech?.()
+                      else onStartSpeech?.()
+                      return
+                    }
+                    if (isGranting || isRunning) return
+                    setIsGranting(true)
+                    if (grantTimerRef.current) {
+                      window.clearTimeout(grantTimerRef.current)
+                      grantTimerRef.current = null
+                    }
+                    grantTimerRef.current = window.setTimeout(() => {
+                      setIsGranting(false)
+                      onStartSpeech?.()
+                      setIsRunning(true)
+                      grantTimerRef.current = null
+                    }, 1000)
                   }}
-                  disabled={isRunning}
+                  disabled={startButtonDisabled}
                 >
-                  <Play className="h-7 w-7" />
-                  발언 시작
+                  {startOnlyMode ? (
+                    !participantCanStart && startOnlyStatus !== "running" ? (
+                      <Lock className="h-7 w-7" />
+                    ) : participantUseRequestFlow && (startOnlyStatus === "idle" || startOnlyStatus === "requesting") ? (
+                      <Hand className="h-7 w-7" />
+                    ) : (
+                      <Mic className="h-7 w-7" />
+                    )
+                  ) : (
+                    <Hand className="h-7 w-7" />
+                  )}
+                  {startOnlyMode ? startOnlyButtonLabel : isGranting ? "발언권 부여 중..." : "발언권 부여"}
                 </Button>
               )}
             </div>
           ) : null}
         </div>
 
-        {isRunning || isFreeMode ? (
+        {showRunningPanel && showCards ? (
+          <div className="mb-2 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setCardsVisible((prev) => !prev)}
+            >
+              {cardsVisible ? "카드 숨기기" : "카드 보기"}
+            </Button>
+          </div>
+        ) : null}
+
+        {showRunningPanel && showCards && cardsVisible ? (
           <>
         <div className="flex flex-wrap justify-center gap-4">
           <div
@@ -838,4 +963,3 @@ export function QuickAddScreen({
     </div>
   )
 }
-

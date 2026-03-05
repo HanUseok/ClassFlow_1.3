@@ -44,6 +44,7 @@ type DebateConfig = {
     negativeSlots: number
     moderatorSlots: number
     selectedStudentIds?: string[]
+    recordingStudentIds?: string[]
     groupAssignments?: Record<
       string,
       {
