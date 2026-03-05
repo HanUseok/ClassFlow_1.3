@@ -1,6 +1,13 @@
-import type { Session, Student } from "@/lib/mock-data"
+﻿import type { Session, Student } from "@/lib/mock-data"
 
-export type PhaseKey = "Opening" | "Rebuttal" | "Rerebuttal" | "FinalSummary"
+export const PHASE = {
+  OPENING: "Opening",
+  REBUTTAL: "Rebuttal",
+  REREBUTTAL: "Rerebuttal",
+  FINAL_SUMMARY: "FinalSummary",
+} as const
+
+export type PhaseKey = (typeof PHASE)[keyof typeof PHASE]
 export type DebateMode = "Ordered" | "Free"
 
 export type DebateMember = {
@@ -42,9 +49,25 @@ export type ReportPayloadInput = {
 
 export type DebateGroup = NonNullable<NonNullable<Session["debate"]>["groups"]>[number]
 
-export const PHASE_ORDER: PhaseKey[] = ["Opening", "Rebuttal", "Rerebuttal", "FinalSummary"]
+export const PHASE_ORDER: PhaseKey[] = [
+  PHASE.OPENING,
+  PHASE.REBUTTAL,
+  PHASE.REREBUTTAL,
+  PHASE.FINAL_SUMMARY,
+]
 
-export function advancePhase(state: SpeechProgressState) {
+export function createDebateFlowState(params?: Partial<SpeechProgressState>): SpeechProgressState {
+  return {
+    phase: PHASE.OPENING,
+    currentSpeakerIndex: 0,
+    speakerCount: 0,
+    debateMode: "Ordered",
+    finalSpeechCompleted: false,
+    ...params,
+  }
+}
+
+export function advanceDebateFlow(state: SpeechProgressState) {
   if (state.speakerCount <= 0) {
     return {
       ...state,
@@ -92,10 +115,35 @@ export function advancePhase(state: SpeechProgressState) {
   }
 }
 
+export const advancePhase = advanceDebateFlow
+
 export function canEndDebate(state: SpeechProgressState) {
   if (state.speakerCount <= 0) return false
   if (state.debateMode === "Free") return true
   return state.finalSpeechCompleted
+}
+
+export function isStudentPlacedInGroup(group: DebateGroup | undefined, studentId: string) {
+  if (!group || !studentId) return false
+  return (
+    group.affirmative.some((student) => student.id === studentId) ||
+    group.negative.some((student) => student.id === studentId) ||
+    group.moderator?.id === studentId
+  )
+}
+
+export function getStationPlacementStatus(groups: DebateGroup[], seatConfig = { affirmative: 2, negative: 2, moderator: 1 }) {
+  return groups.map((group, index) => {
+    const requiredTotal = seatConfig.affirmative + seatConfig.negative + seatConfig.moderator
+    const placedTotal = group.affirmative.length + group.negative.length + (group.moderator ? 1 : 0)
+    return {
+      groupId: group.id,
+      label: `${index + 1}조`,
+      placedTotal,
+      requiredTotal,
+      done: requiredTotal === 0 ? placedTotal > 0 : placedTotal >= requiredTotal,
+    }
+  })
 }
 
 export function buildDebateGroups(session: Session, targetCount: number): DebateGroup[] {
@@ -175,7 +223,7 @@ export function buildFreeModeImaginedLogs(members: { id: string; name: string; r
     "6) 규제보다 미디어 교육",
   ]
   const thinkingCards = ["적용", "인과 설명", "비교", "한계 지적", "반례 제시", "전제 분석", "자료 보완", "입장 수정"]
-  const phases = ["Opening", "Rebuttal", "Rerebuttal", "FinalSummary"] as const
+  const phases: PhaseKey[] = [PHASE.OPENING, PHASE.REBUTTAL, PHASE.REREBUTTAL, PHASE.FINAL_SUMMARY]
 
   return members.map((member, idx) => {
     const argumentCard = argumentCards[idx % argumentCards.length]
@@ -186,7 +234,7 @@ export function buildFreeModeImaginedLogs(members: { id: string; name: string; r
       argumentCard,
       argumentKeyword: `${argumentCard} 근거를 자유토론 맥락에서 확장`,
       thinkingCard,
-      thinkingKeyword: `${thinkingCard} 중심으로 상대 주장과 접점을 조정`,
+      thinkingKeyword: `${thinkingCard} 중심으로 상대 주장과 쟁점을 조정`,
     }
   })
 }

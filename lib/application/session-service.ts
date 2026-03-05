@@ -1,6 +1,8 @@
 import type { Session, SessionStatus } from "@/lib/mock-data"
 import {
   buildReportPayload,
+  buildFreeModeImaginedLogs,
+  type DebateMode,
   type DebateGroup,
   type ReportLogItem,
   type ReportPayloadInput,
@@ -10,6 +12,7 @@ import type { SessionRepository } from "@/lib/application/ports/session-reposito
 import type { CreateSessionInput, UpdateSessionInput } from "@/lib/mock-session-store"
 
 export type { CreateSessionInput, UpdateSessionInput }
+export type ParticipantStartStatus = "idle" | "requesting" | "ready" | "running"
 
 let repository: SessionRepository = localSessionRepository
 
@@ -97,4 +100,108 @@ export function saveSpeech(history: ReportLogItem[], log: ReportLogItem, limit: 
 
 export function buildSessionReportPath(input: ReportPayloadInput) {
   return buildReportPayload(input)
+}
+
+export function startParticipantSpeech(params: {
+  debateMode: DebateMode
+  status: ParticipantStartStatus
+  isCurrentSpeakerSelf: boolean
+  requestDelayMs?: number
+}) {
+  const { debateMode, status, isCurrentSpeakerSelf, requestDelayMs = 3000 } = params
+
+  if (debateMode === "Ordered") {
+    if (!isCurrentSpeakerSelf) {
+      return { nextStatus: status, shouldStartSpeech: false, shouldRequest: false, requestDelayMs }
+    }
+    return { nextStatus: "running" as const, shouldStartSpeech: true, shouldRequest: false, requestDelayMs }
+  }
+
+  if (status === "idle") {
+    return { nextStatus: "requesting" as const, shouldStartSpeech: false, shouldRequest: true, requestDelayMs }
+  }
+
+  if (status === "ready") {
+    return { nextStatus: "running" as const, shouldStartSpeech: true, shouldRequest: false, requestDelayMs }
+  }
+
+  return { nextStatus: status, shouldStartSpeech: false, shouldRequest: false, requestDelayMs }
+}
+
+export function finishParticipantSpeech(params: {
+  debateMode: DebateMode
+  status: ParticipantStartStatus
+  completedSpeeches: number
+}) {
+  const { debateMode, status, completedSpeeches } = params
+  if (status !== "running") {
+    return { nextStatus: status, shouldAdvanceOrderedFlow: false, completedSpeeches }
+  }
+
+  if (debateMode === "Free") {
+    return {
+      nextStatus: "idle" as const,
+      shouldAdvanceOrderedFlow: false,
+      completedSpeeches: completedSpeeches + 1,
+    }
+  }
+
+  return {
+    nextStatus: "idle" as const,
+    shouldAdvanceOrderedFlow: true,
+    completedSpeeches,
+  }
+}
+
+export function completeStationDebate(params: {
+  sessionId: string
+  debateMode: DebateMode
+  memberNames: string[]
+  memberLabels?: string[]
+  sessionTitle: string
+  teacherGuided: boolean
+  groupLayout: { affirmative: string[]; negative: string[] }[]
+  round?: number
+  personal?: boolean
+  markSessionEnded?: boolean
+}) {
+  const {
+    sessionId,
+    debateMode,
+    memberNames,
+    memberLabels,
+    sessionTitle,
+    teacherGuided,
+    groupLayout,
+    round = 1,
+    personal = false,
+    markSessionEnded = true,
+  } = params
+
+  const session = markSessionEnded ? repository.updateStatus(sessionId, "Ended") : repository.getById(sessionId)
+  const logs =
+    debateMode === "Free" && !personal
+      ? buildFreeModeImaginedLogs(
+          (memberLabels ?? memberNames).map((value, index) => ({
+            id: `m-${index + 1}`,
+            name: memberNames[index] ?? value,
+            roleLabel: memberLabels?.[index] ?? "",
+          }))
+        )
+      : []
+
+  const reportPath = buildSessionReportPath({
+    names: memberNames,
+    round,
+    phase: debateMode === "Free" ? "자유토론" : "마무리",
+    logs,
+    sessionId,
+    teacherGuided,
+    sessionTitle,
+    sessionStatus: "Ended",
+    groupCount: groupLayout.length,
+    groupLayout: JSON.stringify(groupLayout),
+  })
+
+  return { session, reportPath }
 }
