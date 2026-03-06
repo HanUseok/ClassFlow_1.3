@@ -53,6 +53,7 @@
 - `setup`
 - `headcount`
 - `cards`
+- 단, 선택 학생 전원이 녹음 대상이면 `cards` 단계를 생략하고 `headcount`에서 바로 생성 가능
 
 ### 생성 가능 조건
 - Debate: `orderedFlowValid && cardsReady && hasEnoughSlots`
@@ -85,6 +86,7 @@
 - 세션 목록/기본 정보: localStorage 저장
 - 토론 런타임(phase/index/running): 메모리 상태 (새로고침 복구 없음)
 - featured evidence: 별도 store 구독 기반
+- 토론 녹음 대상: `debate.assignmentConfig.recordingStudentIds`에 저장
 
 ## 7) Empty/Error States
 - 세션 없음: 상세/스테이션에서 안내 메시지

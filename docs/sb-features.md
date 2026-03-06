@@ -33,8 +33,10 @@
 - `type`과 `sessionId` 쿼리로 생성/수정 모드 진입
 - Debate
 - `setup -> headcount -> cards` 단계
+- 단, 토론 대상 전원이 녹음 대상이면 `cards` 단계는 생략 가능
 - 모드(Ordered/Free), guided 여부, 단계별 시간 설정
 - 조별 배치/슬롯 조정/랜덤 배정
+- 토론 녹음 대상 학생 선택(`recordingStudentIds`)
 - 논거 카드 검수(유효 카드 수 조건)
 - Presentation
 - 발표 순서, 발표 시간, 녹음 여부 설정
@@ -43,6 +45,7 @@
 ## F. 세션 상세 (`/teacher/sessions/[id]`)
 - Debate/Presentation 타입별 실행 화면 분기
 - Debate: 발언 순서/단계/종료 관리
+- Debate: 녹음 제외 학생이 포함된 조에서는 카드 기반 기록 UI 노출
 - Presentation: 발표 진행과 타이머 기반 전개
 - 세션 없음 또는 로딩 상태 안내
 
@@ -64,6 +67,7 @@
 - 상태: `landing -> identity -> group -> waiting -> live`
 - 활성 토론 세션 없으면 안내 메시지 표시
 - live에서 Quick Add와 발언 제어 수행
+- 토론 녹음 대상 제한 시, 비대상 참여자에게 기록 제한 UI 적용
 - 종료 시 `/station/report?...&source=station`으로 이동
 
 ## K. Station 리포트 (`/station/report`)

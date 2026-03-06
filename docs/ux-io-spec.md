@@ -59,10 +59,12 @@
 - `groupAssignments`, `groupSlotAdjust`
 - `argumentCards[]`
 - `recordingStudentIds`
+- 규칙: 선택 학생 전원이 녹음 대상이면 cards 단계 생략 가능
 
 ### Debate Output
 - `CreateSessionInput` 생성
 - `Session` 생성/수정 후 상세 화면 이동
+- `debate.assignmentConfig.recordingStudentIds` 저장
 
 ### Debate Example
 ```json
@@ -134,6 +136,7 @@
 ### Output
 - entry state 전이: `landing -> identity -> group -> waiting -> live`
 - 발화 제어 결과 반영
+- 참여자가 녹음 대상이 아니면 기록 제한 UI 반영
 - 종료 시 `/station/report?...&source=station`
 
 ### Example

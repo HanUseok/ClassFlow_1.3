@@ -75,3 +75,9 @@
 ## 5) 저장/복구
 - 세션 데이터: localStorage 저장
 - 토론 런타임 상태: 메모리 상태, 새로고침 시 초기화
+- 토론 녹음 대상 목록: 세션의 `debate.assignmentConfig.recordingStudentIds`에 저장
+
+## 6) Debate Recording Rule
+- 녹음 대상 목록이 비어 있으면 모든 참여자 기록 가능
+- 녹음 대상 목록이 있으면 목록에 포함된 참여자만 기록 가능
+- 비대상 참여자는 Station live에서 기록 제한 UI를 보게 됨

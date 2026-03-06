@@ -21,9 +21,11 @@
 - Debate/Presentation 생성
 - Debate mode(Ordered/Free), guided/unguided
 - 슬롯/배치/논거 카드 설정
+- Debate 녹음 대상 선택(`recordingStudentIds`)
 - 세션 상세
 - Debate 진행/종료
 - Teacher guided 진행/관리 화면 전환
+- 녹음 제외 참여자에 대한 기록 UI 제한
 - Presentation 진행(타이머)
 - 학생
 - 목록/검색/학급 필터
