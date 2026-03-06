@@ -8,32 +8,71 @@ import { QuickAddScreen } from "@/components/station/quick-add-screen"
 import { DeskLayoutBoard } from "@/components/session/desk-layout-board"
 import { Button } from "@/components/ui/button"
 import { useMockSessions } from "@/hooks/use-mock-sessions"
-import { useSessionFlow } from "@/hooks/use-session-flow"
 import { useStationEntryFlow } from "@/hooks/station/use-station-entry-flow"
 import { useStationPlacementFlow } from "@/hooks/station/use-station-placement-flow"
 import { useParticipantSpeechFlow } from "@/hooks/station/use-participant-speech-flow"
 import { completeStationDebate } from "@/lib/application/session-service"
+import { advanceDebateFlow, canEndDebate } from "@/lib/domain/session"
 import { listStudents } from "@/lib/application/roster-service"
 import type { Session } from "@/lib/mock-data"
 
 const PHASE_KEYS = ["Opening", "Rebuttal", "Rerebuttal", "FinalSummary"] as const
 type PhaseKey = (typeof PHASE_KEYS)[number]
-const STATION_FLOW_ID = "station-default-flow"
 const STATION_GROUP_COUNT = 2
 type StationGroup = NonNullable<NonNullable<NonNullable<Session["debate"]>["groups"]>>[number]
 
+function sameOrderedMembers(
+  left: { id: string; name: string; roleLabel: string }[],
+  right: { id: string; name: string; roleLabel: string }[]
+) {
+  if (left.length !== right.length) return false
+  return left.every(
+    (member, index) =>
+      member.id === right[index]?.id &&
+      member.name === right[index]?.name &&
+      member.roleLabel === right[index]?.roleLabel
+  )
+}
+
 export default function StationPage() {
   const router = useRouter()
-  const flow = useSessionFlow()
   const participantFlow = useParticipantSpeechFlow()
+  const {
+    status: participantStatus,
+    completedSpeeches,
+    resetForSession,
+    resetForStudent,
+    syncWithSpeechRunning,
+    requestOrStartSpeech,
+    endSpeech,
+  } = participantFlow
   const entryFlow = useStationEntryFlow()
+  const {
+    state: entryState,
+    selectedStudentId,
+    setSelectedStudentId,
+    selectedGroupIndex,
+    setSelectedGroupIndex,
+    goLanding,
+    goIdentity,
+    goGroup,
+    goLive,
+    selectGroupAndWait,
+  } = entryFlow
   const participantReportRedirectedRef = useRef(false)
 
   const { sessions, hydrated, setStatus, setDebateGroups } = useMockSessions()
   const [orderedMembers, setOrderedMembers] = useState<{ id: string; name: string; roleLabel: string }[]>([])
+  const [currentPhase, setCurrentPhase] = useState<PhaseKey>("Opening")
+  const [currentSpeakerIndex, setCurrentSpeakerIndex] = useState(0)
+  const [isSpeechRunning, setIsSpeechRunning] = useState(false)
+  const [finalSpeechCompleted, setFinalSpeechCompleted] = useState(false)
+  const [freeSpeechType, setFreeSpeechType] = useState<"질문" | "반박" | "동의" | null>(null)
 
   const activeDebate = useMemo(() => {
-    const debateSessions = sessions.filter((session) => session.type === "Debate")
+    const debateSessions = sessions.filter(
+      (session) => session.type === "Debate" && (session.status === "Pending" || session.status === "Live")
+    )
     if (debateSessions.length === 0) return undefined
 
     const pending = debateSessions.find((session) => session.status === "Pending")
@@ -42,7 +81,7 @@ export default function StationPage() {
     const live = debateSessions.find((session) => session.status === "Live")
     if (live) return live
 
-    return [...debateSessions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+    return undefined
   }, [sessions])
 
   const placementCandidates = useMemo(() => {
@@ -73,23 +112,26 @@ export default function StationPage() {
   }, [activeDebate])
 
   const selectedStudent = useMemo(
-    () => placementCandidates.find((student) => student.id === entryFlow.selectedStudentId),
-    [placementCandidates, entryFlow.selectedStudentId]
+    () => placementCandidates.find((student) => student.id === selectedStudentId),
+    [placementCandidates, selectedStudentId]
   )
 
   const goLiveFromWaiting = useCallback(
     (groups: StationGroup[]) => {
       if (!activeDebate) return
       setDebateGroups(activeDebate.id, groups)
-      entryFlow.goLive()
+      if (activeDebate.status !== "Live") {
+        setStatus(activeDebate.id, "Live")
+      }
+      goLive()
     },
-    [activeDebate, entryFlow, setDebateGroups]
+    [activeDebate, goLive, setDebateGroups, setStatus]
   )
 
   const placementFlow = useStationPlacementFlow({
     activeDebate,
-    selectedGroupIndex: entryFlow.selectedGroupIndex,
-    setSelectedGroupIndex: entryFlow.setSelectedGroupIndex,
+    selectedGroupIndex,
+    setSelectedGroupIndex,
     selectedStudent,
     placementCandidates,
     groupCount: STATION_GROUP_COUNT,
@@ -97,7 +139,7 @@ export default function StationPage() {
   })
 
   const teamMembers = useMemo(() => {
-    const primaryGroup = placementFlow.stationGroups[entryFlow.selectedGroupIndex]
+    const primaryGroup = placementFlow.stationGroups[selectedGroupIndex]
     const affirmative = primaryGroup?.affirmative ?? []
     const negative = primaryGroup?.negative ?? []
     const maxLength = Math.max(affirmative.length, negative.length)
@@ -111,31 +153,33 @@ export default function StationPage() {
     }
 
     return merged
-  }, [placementFlow.stationGroups, entryFlow.selectedGroupIndex])
+  }, [placementFlow.stationGroups, selectedGroupIndex])
 
   useEffect(() => {
-    setOrderedMembers(teamMembers)
-    flow.resetGroup(STATION_FLOW_ID)
-  }, [activeDebate?.id, flow, teamMembers])
+    setOrderedMembers((prev) => (sameOrderedMembers(prev, teamMembers) ? prev : teamMembers))
+  }, [teamMembers])
 
-  const groupState = flow.getGroupState(STATION_FLOW_ID)
-  const currentPhase: PhaseKey = groupState.phase
-  const currentSpeakerIndex = groupState.currentSpeakerIndex
-  const isSpeechRunning = groupState.isSpeechRunning
+  useEffect(() => {
+    setCurrentPhase("Opening")
+    setCurrentSpeakerIndex(0)
+    setIsSpeechRunning(false)
+    setFinalSpeechCompleted(false)
+    setFreeSpeechType(null)
+  }, [activeDebate?.id, selectedGroupIndex])
+
   const debateMode = activeDebate?.debate?.mode ?? "Ordered"
 
   const selectedMemberIndex = useMemo(
     () => orderedMembers.findIndex((member) => member.id === entryFlow.selectedStudentId),
-    [orderedMembers, entryFlow.selectedStudentId]
+    [orderedMembers, selectedStudentId]
   )
 
   const isCurrentUserModerator = Boolean(
-    entryFlow.selectedStudentId &&
-      placementFlow.currentPlacementGroup?.moderator?.id === entryFlow.selectedStudentId
+    selectedStudentId && placementFlow.currentPlacementGroup?.moderator?.id === selectedStudentId
   )
 
   const isCurrentSpeakerSelf = Boolean(
-    entryFlow.selectedStudentId && orderedMembers[currentSpeakerIndex]?.id === entryFlow.selectedStudentId
+    selectedStudentId && orderedMembers[currentSpeakerIndex]?.id === selectedStudentId
   )
 
   const participantSpeakerIndex =
@@ -146,52 +190,70 @@ export default function StationPage() {
   const isParticipantRecordingEnabled = useMemo(() => {
     const configured = activeDebate?.debate?.assignmentConfig?.recordingStudentIds
     if (!configured || configured.length === 0) return true
-    return configured.includes(entryFlow.selectedStudentId)
-  }, [activeDebate?.debate?.assignmentConfig?.recordingStudentIds, entryFlow.selectedStudentId])
+    return configured.includes(selectedStudentId)
+  }, [activeDebate?.debate?.assignmentConfig?.recordingStudentIds, selectedStudentId])
 
-  const isDebateFinished = flow.isDebateFinished(STATION_FLOW_ID, orderedMembers.length, debateMode)
+  const isDebateFinished = canEndDebate({
+    phase: currentPhase,
+    currentSpeakerIndex,
+    speakerCount: orderedMembers.length,
+    debateMode,
+    finalSpeechCompleted,
+  }) && !isSpeechRunning
 
   useEffect(() => {
-    participantFlow.resetForSession()
+    resetForSession()
     participantReportRedirectedRef.current = false
-  }, [activeDebate?.id, participantFlow])
+  }, [activeDebate?.id, resetForSession])
 
   useEffect(() => {
-    participantFlow.resetForStudent()
-  }, [entryFlow.selectedStudentId, participantFlow])
+    resetForStudent()
+  }, [selectedStudentId, resetForStudent])
 
   useEffect(() => {
-    participantFlow.syncWithSpeechRunning(isSpeechRunning, isCurrentUserModerator)
-  }, [isSpeechRunning, isCurrentUserModerator, participantFlow])
+    syncWithSpeechRunning(isSpeechRunning, isCurrentUserModerator)
+  }, [isSpeechRunning, isCurrentUserModerator, syncWithSpeechRunning])
 
   useEffect(() => {
-    if (entryFlow.state !== "live") return
+    if (entryState !== "live") return
     if (isCurrentUserModerator) return
     if (debateMode !== "Ordered") return
     if (isCurrentSpeakerSelf) return
     if (orderedMembers.length <= 0) return
 
     const timer = window.setTimeout(() => {
-      flow.handleEndSpeech(STATION_FLOW_ID, orderedMembers.length, debateMode)
+      const nextState = advanceDebateFlow({
+        phase: currentPhase,
+        currentSpeakerIndex,
+        speakerCount: orderedMembers.length,
+        debateMode,
+        finalSpeechCompleted,
+      })
+      setCurrentPhase(nextState.phase)
+      setCurrentSpeakerIndex(nextState.currentSpeakerIndex)
+      setIsSpeechRunning(false)
+      setFinalSpeechCompleted(nextState.finalSpeechCompleted)
     }, 1000)
 
     return () => window.clearTimeout(timer)
   }, [
+    currentPhase,
+    currentSpeakerIndex,
     debateMode,
-    entryFlow.state,
-    flow,
+    entryState,
+    finalSpeechCompleted,
     isCurrentSpeakerSelf,
     isCurrentUserModerator,
     orderedMembers.length,
   ])
 
   useEffect(() => {
-    if (entryFlow.state !== "live") return
+    if (entryState !== "live") return
     if (isCurrentUserModerator) return
     if (!activeDebate) return
 
     const orderedFinished = debateMode === "Ordered" && isDebateFinished
-    const freeReachedLimit = debateMode === "Free" && participantFlow.completedSpeeches >= 3
+    const freeReachedLimit = debateMode === "Free" && completedSpeeches >= 3
     const shouldRedirect = activeDebate.status === "Ended" || orderedFinished || freeReachedLimit
     if (!shouldRedirect || participantReportRedirectedRef.current) return
 
@@ -201,17 +263,35 @@ export default function StationPage() {
 
     const participantName =
       selectedStudent?.name ||
-      orderedMembers.find((member) => member.id === entryFlow.selectedStudentId)?.name ||
+      orderedMembers.find((member) => member.id === selectedStudentId)?.name ||
       "참여자"
+    const reportMemberNames =
+      debateMode === "Ordered" && orderedMembers.length > 0
+        ? orderedMembers.map((member) => member.name)
+        : [participantName]
+    const reportMemberLabels =
+      debateMode === "Ordered" && orderedMembers.length > 0
+        ? orderedMembers.map((member) => member.roleLabel)
+        : undefined
+    const reportGroupLayout =
+      debateMode === "Ordered" && placementFlow.currentPlacementGroup
+        ? [
+            {
+              affirmative: placementFlow.currentPlacementGroup.affirmative.map((student) => student.name),
+              negative: placementFlow.currentPlacementGroup.negative.map((student) => student.name),
+            },
+          ]
+        : [{ affirmative: [], negative: [] }]
 
     const { reportPath } = completeStationDebate({
       sessionId: activeDebate.id,
       debateMode,
-      memberNames: [participantName],
+      memberNames: reportMemberNames,
+      memberLabels: reportMemberLabels,
       sessionTitle: `${activeDebate.title} - 개인 점검`,
       teacherGuided: activeDebate.debate?.teacherGuided ?? false,
-      groupLayout: [{ affirmative: [], negative: [] }],
-      personal: true,
+      groupLayout: reportGroupLayout,
+      personal: debateMode !== "Ordered",
       markSessionEnded: orderedFinished,
     })
 
@@ -219,14 +299,15 @@ export default function StationPage() {
     router.push(`${reportPath}&source=station`)
   }, [
     activeDebate,
+    completedSpeeches,
     debateMode,
-    entryFlow.selectedStudentId,
-    entryFlow.state,
+    entryState,
     isCurrentUserModerator,
     isDebateFinished,
     orderedMembers,
-    participantFlow.completedSpeeches,
+    placementFlow.currentPlacementGroup,
     router,
+    selectedStudentId,
     selectedStudent,
     setStatus,
   ])
@@ -244,18 +325,23 @@ export default function StationPage() {
   const handlePhaseChange = (nextPhase: string) => {
     const nextIndex = PHASE_KEYS.indexOf(nextPhase as PhaseKey)
     if (nextIndex < 0) return
-    flow.setGroupPhase(STATION_FLOW_ID, PHASE_KEYS[nextIndex])
+    setCurrentPhase(PHASE_KEYS[nextIndex])
+    setCurrentSpeakerIndex(0)
+    setIsSpeechRunning(false)
+    setFinalSpeechCompleted(false)
   }
 
   const handleSelectSpeaker = (index: number) => {
     if (index < 0 || index >= orderedMembers.length) return
-    flow.setGroupSpeakerIndex(STATION_FLOW_ID, index)
+    setCurrentSpeakerIndex(index)
+    setIsSpeechRunning(false)
+    setFinalSpeechCompleted(false)
   }
 
   const handleEndDebate = () => {
     if (!activeDebate) return
 
-    flow.setSpeechRunning(STATION_FLOW_ID, false)
+    setIsSpeechRunning(false)
     const { reportPath } = completeStationDebate({
       sessionId: activeDebate.id,
       debateMode,
@@ -292,7 +378,7 @@ export default function StationPage() {
 
   return (
     <div className="w-full max-w-6xl">
-      {entryFlow.state === "waiting" ? (
+      {entryState === "waiting" ? (
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -342,9 +428,9 @@ export default function StationPage() {
         </div>
       ) : null}
 
-      {entryFlow.state === "landing" && (
+      {entryState === "landing" && (
         <WaitingScreen
-          onJoin={entryFlow.goIdentity}
+          onJoin={goIdentity}
           sessionInfo={{
             topic: activeDebate.topic ?? "No topic",
             teacherName: "Teacher",
@@ -355,7 +441,7 @@ export default function StationPage() {
         />
       )}
 
-      {entryFlow.state === "identity" ? (
+      {entryState === "identity" ? (
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-sm font-semibold text-foreground">이름 선택</p>
           <p className="mt-1 text-xs text-muted-foreground">입장할 학생 이름을 선택하세요.</p>
@@ -364,9 +450,9 @@ export default function StationPage() {
               <button
                 key={student.id}
                 type="button"
-                onClick={() => entryFlow.setSelectedStudentId(student.id)}
+                onClick={() => setSelectedStudentId(student.id)}
                 className={`rounded-md border px-3 py-2 text-left text-sm transition ${
-                  entryFlow.selectedStudentId === student.id
+                  selectedStudentId === student.id
                     ? "border-primary bg-primary/10 text-foreground"
                     : "border-border bg-background text-foreground hover:bg-accent"
                 }`}
@@ -376,17 +462,17 @@ export default function StationPage() {
             ))}
           </div>
           <div className="mt-4 flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={entryFlow.goLanding}>
+            <Button variant="outline" onClick={goLanding}>
               이전
             </Button>
-            <Button disabled={!entryFlow.selectedStudentId} onClick={entryFlow.goGroup}>
+            <Button disabled={!selectedStudentId} onClick={goGroup}>
               다음
             </Button>
           </div>
         </div>
       ) : null}
 
-      {entryFlow.state === "group" ? (
+      {entryState === "group" ? (
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-sm font-semibold text-foreground">조 선택</p>
           <p className="mt-1 text-xs text-muted-foreground">조 배치 상태를 보고 참가할 조를 선택하세요.</p>
@@ -395,7 +481,7 @@ export default function StationPage() {
               <button
                 key={status.groupId}
                 type="button"
-                onClick={() => entryFlow.selectGroupAndWait(index)}
+                onClick={() => selectGroupAndWait(index)}
                 className={`rounded-lg border px-3 py-2 text-left transition ${
                   index === placementFlow.currentPlacementGroupIndex
                     ? "border-primary bg-primary/10"
@@ -417,14 +503,14 @@ export default function StationPage() {
             ))}
           </div>
           <div className="mt-4 flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={entryFlow.goIdentity}>
+            <Button variant="outline" onClick={goIdentity}>
               이전
             </Button>
           </div>
         </div>
       ) : null}
 
-      {entryFlow.state === "live" && (
+      {entryState === "live" && (
         <div className="flex flex-col gap-4">
           <LiveDebateScreen
             round={1}
@@ -439,6 +525,8 @@ export default function StationPage() {
             onSelectSpeaker={handleSelectSpeaker}
             onPhaseChange={handlePhaseChange}
             interactionDisabled={!isCurrentUserModerator}
+            freeSpeechType={debateMode === "Free" ? freeSpeechType : null}
+            onFreeSpeechTypeChange={debateMode === "Free" ? setFreeSpeechType : undefined}
           />
           <QuickAddScreen
             round={1}
@@ -450,41 +538,68 @@ export default function StationPage() {
             currentSpeaker={orderedMembers[participantSpeakerIndex]}
             onStartSpeech={() => {
               if (isCurrentUserModerator) {
-                flow.setSpeechRunning(STATION_FLOW_ID, true)
+                setIsSpeechRunning(true)
                 return
               }
 
-              participantFlow.requestOrStartSpeech({
+              requestOrStartSpeech({
                 debateMode,
                 isCurrentSpeakerSelf,
                 selectedMemberIndex,
-                setSpeakerIndex: (index) => flow.setGroupSpeakerIndex(STATION_FLOW_ID, index),
-                setSpeechRunning: (running) => flow.setSpeechRunning(STATION_FLOW_ID, running),
+                setSpeakerIndex: (index) => {
+                  setCurrentSpeakerIndex(index)
+                  setFinalSpeechCompleted(false)
+                },
+                setSpeechRunning: (running) => setIsSpeechRunning(running),
               })
             }}
             onEndSpeech={() => {
               if (isCurrentUserModerator) {
-                flow.handleEndSpeech(STATION_FLOW_ID, orderedMembers.length, debateMode)
+                const nextState = advanceDebateFlow({
+                  phase: currentPhase,
+                  currentSpeakerIndex,
+                  speakerCount: orderedMembers.length,
+                  debateMode,
+                  finalSpeechCompleted,
+                })
+                setCurrentPhase(nextState.phase)
+                setCurrentSpeakerIndex(nextState.currentSpeakerIndex)
+                setIsSpeechRunning(false)
+                setFinalSpeechCompleted(nextState.finalSpeechCompleted)
                 return
               }
 
-              participantFlow.endSpeech({
+              endSpeech({
                 debateMode,
-                setSpeechRunning: (running) => flow.setSpeechRunning(STATION_FLOW_ID, running),
-                onOrderedEnd: () => flow.handleEndSpeech(STATION_FLOW_ID, orderedMembers.length, debateMode),
+                setSpeechRunning: (running) => setIsSpeechRunning(running),
+                onOrderedEnd: () => {
+                  const nextState = advanceDebateFlow({
+                    phase: currentPhase,
+                    currentSpeakerIndex,
+                    speakerCount: orderedMembers.length,
+                    debateMode,
+                    finalSpeechCompleted,
+                  })
+                  setCurrentPhase(nextState.phase)
+                  setCurrentSpeakerIndex(nextState.currentSpeakerIndex)
+                  setIsSpeechRunning(false)
+                  setFinalSpeechCompleted(nextState.finalSpeechCompleted)
+                },
               })
             }}
             debateFinished={isDebateFinished}
             compact
             startOnlyMode={!isCurrentUserModerator}
-            speechRunning={isCurrentUserModerator ? isSpeechRunning : participantFlow.status === "running"}
-            startOnlyStatus={isCurrentUserModerator ? "idle" : participantFlow.status}
+            speechRunning={isCurrentUserModerator ? isSpeechRunning : participantStatus === "running"}
+            startOnlyStatus={isCurrentUserModerator ? "idle" : participantStatus}
             participantCanStart={
               isCurrentUserModerator ? true : debateMode === "Free" ? true : isCurrentSpeakerSelf
             }
             participantUseRequestFlow={!isCurrentUserModerator && debateMode === "Free"}
             participantRecordingEnabled={isParticipantRecordingEnabled}
             showCards={!isCurrentUserModerator && !isParticipantRecordingEnabled}
+            speechType={debateMode === "Free" ? freeSpeechType : null}
+            onSpeechTypeChange={debateMode === "Free" ? setFreeSpeechType : undefined}
           />
         </div>
       )}

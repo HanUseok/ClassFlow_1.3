@@ -115,14 +115,6 @@ export function useStationPlacementFlow({
       if (!nextGroup) return
 
       const merged = [...stationGroups]
-      const wasPlaced = Boolean(
-        selectedStudent &&
-          currentPlacementGroup &&
-          (currentPlacementGroup.affirmative.some((student) => student.id === selectedStudent.id) ||
-            currentPlacementGroup.negative.some((student) => student.id === selectedStudent.id) ||
-            currentPlacementGroup.moderator?.id === selectedStudent.id)
-      )
-
       const nowPlaced = Boolean(
         selectedStudent &&
           (nextGroup.affirmative.some((student) => student.id === selectedStudent.id) ||
@@ -133,7 +125,9 @@ export function useStationPlacementFlow({
       merged[currentPlacementGroupIndex] = nextGroup
       setStationGroups(merged)
 
-      if (!wasPlaced || !nowPlaced) return
+      // Auto-fill should start as soon as the selected student is placed in the current group.
+      // `wasPlaced` is false on the first successful drop, so only guard on the post-drop state.
+      if (!nowPlaced) return
 
       const seatCfg = placementSeatConfig[0] ?? { affirmative: 2, negative: 2, moderator: 1 }
       const assignedIds = new Set(

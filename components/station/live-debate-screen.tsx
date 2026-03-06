@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { GripVertical } from "lucide-react"
@@ -16,16 +16,19 @@ interface LiveDebateScreenProps {
   onPhaseChange?: (phase: string) => void
   onEndDebate?: () => void
   interactionDisabled?: boolean
+  freeSpeechType?: "질문" | "반박" | "동의" | null
+  onFreeSpeechTypeChange?: (value: "질문" | "반박" | "동의" | null) => void
 }
 
 const PHASE_TABS = [
-  { key: "Opening", label: "\uC785\uB860" },
-  { key: "Rebuttal", label: "\uBC18\uB860" },
-  { key: "Rerebuttal", label: "\uC7AC\uBC18\uB860" },
-  { key: "FinalSummary", label: "\uB9C8\uBB34\uB9AC" },
+  { key: "Opening", label: "입론" },
+  { key: "Rebuttal", label: "반론" },
+  { key: "Rerebuttal", label: "재반론" },
+  { key: "FinalSummary", label: "마무리" },
 ] as const
 
 const PHASE_LABELS: Record<string, string> = Object.fromEntries(PHASE_TABS.map((p) => [p.key, p.label]))
+const FREE_SPEECH_TYPES = ["질문", "반박", "동의"] as const
 
 export function LiveDebateScreen({
   round,
@@ -40,6 +43,8 @@ export function LiveDebateScreen({
   onPhaseChange,
   onEndDebate,
   interactionDisabled = false,
+  freeSpeechType = null,
+  onFreeSpeechTypeChange,
 }: LiveDebateScreenProps) {
   const [timeLeft, setTimeLeft] = useState(durationSeconds)
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null)
@@ -73,33 +78,72 @@ export function LiveDebateScreen({
       <div className="rounded-lg border border-border bg-card p-3">
         {debateMode === "Free" ? (
           interactionDisabled ? null : (
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-4">
               <div>
-                <p className="text-xs text-muted-foreground">찬성</p>
+                <p className="text-xs text-muted-foreground">발언 유형</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {teamBuckets.affirmative.map(({ member, index }) => {
-                    const active = index === currentSpeakerIndex
-                    const base = active ? "border-emerald-500 bg-emerald-100 text-emerald-800" : "border-border bg-background text-foreground"
+                  {FREE_SPEECH_TYPES.map((type) => {
+                    const selected = freeSpeechType === type
                     return (
-                      <button key={member.id} type="button" onClick={() => onSelectSpeaker?.(index)} className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:bg-accent ${base}`}>
-                        {member.name}
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => onFreeSpeechTypeChange?.(selected ? null : type)}
+                        className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                          selected
+                            ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+                            : "border-border bg-background text-foreground hover:bg-accent"
+                        }`}
+                      >
+                        {type}
                       </button>
                     )
                   })}
                 </div>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">반대</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {teamBuckets.negative.map(({ member, index }) => {
-                    const active = index === currentSpeakerIndex
-                    const base = active ? "border-emerald-500 bg-emerald-100 text-emerald-800" : "border-border bg-background text-foreground"
-                    return (
-                      <button key={member.id} type="button" onClick={() => onSelectSpeaker?.(index)} className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:bg-accent ${base}`}>
-                        {member.name}
-                      </button>
-                    )
-                  })}
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <p className="text-xs text-muted-foreground">찬성</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {teamBuckets.affirmative.map(({ member, index }) => {
+                      const active = index === currentSpeakerIndex
+                      const base = active
+                        ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+                        : "border-border bg-background text-foreground"
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => onSelectSpeaker?.(index)}
+                          className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:bg-accent ${base}`}
+                        >
+                          {member.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">반대</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {teamBuckets.negative.map(({ member, index }) => {
+                      const active = index === currentSpeakerIndex
+                      const base = active
+                        ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+                        : "border-border bg-background text-foreground"
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => onSelectSpeaker?.(index)}
+                          className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:bg-accent ${base}`}
+                        >
+                          {member.name}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -107,7 +151,7 @@ export function LiveDebateScreen({
         ) : (
           <>
             <div className="mb-2">
-              <p className="text-xs text-muted-foreground">{"\uD1A0\uB860 \uD750\uB984"}</p>
+              <p className="text-xs text-muted-foreground">토론 흐름</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {PHASE_TABS.map((tab) => {
                   const style =
@@ -124,16 +168,23 @@ export function LiveDebateScreen({
                   }
 
                   return (
-                    <button key={tab.key} type="button" onClick={() => onPhaseChange?.(tab.key)} className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:bg-accent ${style}`}>
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => onPhaseChange?.(tab.key)}
+                      className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:bg-accent ${style}`}
+                    >
                       {tab.label}
                     </button>
                   )
                 })}
               </div>
-              <p className="mt-2 text-xs font-medium text-foreground">{"\uD604\uC7AC \uB2E8\uACC4"}: {PHASE_LABELS[phase] ?? phase}</p>
+              <p className="mt-2 text-xs font-medium text-foreground">현재 단계: {PHASE_LABELS[phase] ?? phase}</p>
             </div>
 
-            <p className="text-xs text-muted-foreground">{interactionDisabled ? "\uBC1C\uC5B8 \uC21C\uC11C (\uC9C4\uD589 \uC0C1\uD0DC)" : "\uBC1C\uC5B8 \uC21C\uC11C (\uB4DC\uB798\uADF8\uB85C \uC870\uC815)"}</p>
+            <p className="text-xs text-muted-foreground">
+              {interactionDisabled ? "발언 순서 (진행 상태)" : "발언 순서 (드래그로 조정)"}
+            </p>
             <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
               {teamMembers.map((member, index) => {
                 if (interactionDisabled) {
@@ -143,7 +194,7 @@ export function LiveDebateScreen({
                       : index < currentSpeakerIndex
                         ? "border-emerald-200 bg-emerald-50"
                         : "border-border bg-background"
-                  const statusText = index < currentSpeakerIndex ? "\uC644\uB8CC" : index === currentSpeakerIndex ? "\uC9C4\uD589\uC911" : "\uB300\uAE30"
+                  const statusText = index < currentSpeakerIndex ? "완료" : index === currentSpeakerIndex ? "진행중" : "대기"
                   return (
                     <div key={member.id} className={`flex min-w-[170px] items-center rounded-lg border px-3 py-2 ${statusTone}`}>
                       <div className="min-w-0">
@@ -192,7 +243,7 @@ export function LiveDebateScreen({
 
       <div className="rounded-lg border border-border bg-card p-4 text-center">
         <p className="text-xs uppercase tracking-wider text-muted-foreground">
-          {debateMode === "Free" ? "\uC790\uC720 \uD1A0\uB860" : PHASE_LABELS[phase] ?? phase}
+          {debateMode === "Free" ? "자유 토론" : PHASE_LABELS[phase] ?? phase}
         </p>
         <p className="mt-1 text-lg font-semibold text-card-foreground">
           {teamMembers[currentSpeakerIndex]
@@ -203,22 +254,26 @@ export function LiveDebateScreen({
 
       {debateMode === "Free" ? (
         interactionDisabled ? null : (
-          <button type="button" onClick={() => onEndDebate?.()} className="w-full rounded-md bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700">
-            {"\uD1A0\uB860 \uC885\uB8CC"}
+          <button
+            type="button"
+            onClick={() => onEndDebate?.()}
+            className="w-full rounded-md bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700"
+          >
+            토론 종료
           </button>
         )
       ) : (
         <div className="grid grid-cols-3 gap-3 text-center">
           <div className="rounded-md bg-muted p-3">
-            <p className="text-xs text-muted-foreground">{"\uB77C\uC6B4\uB4DC"}</p>
+            <p className="text-xs text-muted-foreground">라운드</p>
             <p className="text-lg font-bold text-foreground">{round}</p>
           </div>
           <div className="rounded-md bg-muted p-3">
-            <p className="text-xs text-muted-foreground">{"\uB2E8\uACC4"}</p>
+            <p className="text-xs text-muted-foreground">단계</p>
             <p className="text-lg font-bold text-foreground">{PHASE_LABELS[phase] ?? phase}</p>
           </div>
           <div className="rounded-md bg-muted p-3">
-            <p className="text-xs text-muted-foreground">{"\uD0C0\uC774\uBA38"}</p>
+            <p className="text-xs text-muted-foreground">타이머</p>
             <p className={`text-lg font-bold tabular-nums ${timeLeft <= 30 ? "text-destructive" : "text-foreground"}`}>
               {formatTime(timeLeft)}
             </p>

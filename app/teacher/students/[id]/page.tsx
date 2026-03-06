@@ -99,7 +99,7 @@ function StudentEvidenceWorkspace({ studentId }: { studentId: string }) {
   const allStudents = listStudents()
   const debateEvents = listDebateEvents()
   const { sessions } = useMockSessions()
-  const [featuredMap, setFeaturedMap] = useState(() => readFeaturedEvidenceMap())
+  const [featuredMap, setFeaturedMap] = useState<Record<string, string[]>>({})
   const [writingMode, setWritingMode] = useState(false)
   const [showAllFeatured, setShowAllFeatured] = useState(false)
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import {
   advancePhase,
   canEndDebate,
@@ -31,9 +31,9 @@ function getFlow(state: Record<string, GroupFlowState>, groupId: string): GroupF
 export function useSessionFlow() {
   const [groupState, setGroupState] = useState<Record<string, GroupFlowState>>({})
 
-  const getGroupState = (groupId: string) => getFlow(groupState, groupId)
+  const getGroupState = useCallback((groupId: string) => getFlow(groupState, groupId), [groupState])
 
-  const setGroupPhase = (groupId: string, phase: PhaseKey) => {
+  const setGroupPhase = useCallback((groupId: string, phase: PhaseKey) => {
     setGroupState((prev) => ({
       ...prev,
       [groupId]: {
@@ -44,9 +44,9 @@ export function useSessionFlow() {
         finalSpeechCompleted: false,
       },
     }))
-  }
+  }, [])
 
-  const setGroupSpeakerIndex = (groupId: string, index: number) => {
+  const setGroupSpeakerIndex = useCallback((groupId: string, index: number) => {
     setGroupState((prev) => ({
       ...prev,
       [groupId]: {
@@ -56,9 +56,9 @@ export function useSessionFlow() {
         finalSpeechCompleted: false,
       },
     }))
-  }
+  }, [])
 
-  const setSpeechRunning = (groupId: string, isSpeechRunning: boolean) => {
+  const setSpeechRunning = useCallback((groupId: string, isSpeechRunning: boolean) => {
     setGroupState((prev) => ({
       ...prev,
       [groupId]: {
@@ -67,9 +67,9 @@ export function useSessionFlow() {
         finalSpeechCompleted: isSpeechRunning ? false : getFlow(prev, groupId).finalSpeechCompleted,
       },
     }))
-  }
+  }, [])
 
-  const markDebateFinished = (groupId: string) => {
+  const markDebateFinished = useCallback((groupId: string) => {
     setGroupState((prev) => ({
       ...prev,
       [groupId]: {
@@ -78,16 +78,16 @@ export function useSessionFlow() {
         finalSpeechCompleted: true,
       },
     }))
-  }
+  }, [])
 
-  const resetGroup = (groupId: string) => {
+  const resetGroup = useCallback((groupId: string) => {
     setGroupState((prev) => ({
       ...prev,
       [groupId]: defaultGroupFlowState,
     }))
-  }
+  }, [])
 
-  const handleEndSpeech = (groupId: string, speakerCount: number, debateMode: DebateMode) => {
+  const handleEndSpeech = useCallback((groupId: string, speakerCount: number, debateMode: DebateMode) => {
     setGroupState((prev) => {
       const current = getFlow(prev, groupId)
       const nextState = advancePhase({
@@ -108,9 +108,9 @@ export function useSessionFlow() {
         },
       }
     })
-  }
+  }, [])
 
-  const goPrev = (groupId: string, speakerCount: number) => {
+  const goPrev = useCallback((groupId: string, speakerCount: number) => {
     setGroupState((prev) => {
       const current = getFlow(prev, groupId)
       const phaseIndex = PHASE_ORDER.indexOf(current.phase)
@@ -141,9 +141,9 @@ export function useSessionFlow() {
 
       return prev
     })
-  }
+  }, [])
 
-  const goNext = (groupId: string, speakerCount: number) => {
+  const goNext = useCallback((groupId: string, speakerCount: number) => {
     setGroupState((prev) => {
       const current = getFlow(prev, groupId)
       const phaseIndex = PHASE_ORDER.indexOf(current.phase)
@@ -174,9 +174,9 @@ export function useSessionFlow() {
 
       return prev
     })
-  }
+  }, [])
 
-  const isDebateFinished = (groupId: string, speakerCount: number, debateMode: DebateMode) => {
+  const isDebateFinished = useCallback((groupId: string, speakerCount: number, debateMode: DebateMode) => {
     const current = getGroupState(groupId)
     const state: SpeechProgressState = {
       phase: current.phase,
@@ -186,18 +186,32 @@ export function useSessionFlow() {
       finalSpeechCompleted: current.finalSpeechCompleted,
     }
     return canEndDebate(state) && !current.isSpeechRunning
-  }
+  }, [getGroupState])
 
-  return {
-    getGroupState,
-    setGroupPhase,
-    setGroupSpeakerIndex,
-    setSpeechRunning,
-    markDebateFinished,
-    resetGroup,
-    handleEndSpeech,
-    goPrev,
-    goNext,
-    isDebateFinished,
-  }
+  return useMemo(
+    () => ({
+      getGroupState,
+      setGroupPhase,
+      setGroupSpeakerIndex,
+      setSpeechRunning,
+      markDebateFinished,
+      resetGroup,
+      handleEndSpeech,
+      goPrev,
+      goNext,
+      isDebateFinished,
+    }),
+    [
+      getGroupState,
+      setGroupPhase,
+      setGroupSpeakerIndex,
+      setSpeechRunning,
+      markDebateFinished,
+      resetGroup,
+      handleEndSpeech,
+      goPrev,
+      goNext,
+      isDebateFinished,
+    ]
+  )
 }

@@ -28,6 +28,7 @@ export type SpeechProgressState = {
 export type ReportLogItem = {
   phase: string
   speaker: string
+  speechType?: string
   argumentCard: string
   argumentKeyword: string
   thinkingCard: string
@@ -224,6 +225,7 @@ export function buildFreeModeImaginedLogs(members: { id: string; name: string; r
   ]
   const thinkingCards = ["적용", "인과 설명", "비교", "한계 지적", "반례 제시", "전제 분석", "자료 보완", "입장 수정"]
   const phases: PhaseKey[] = [PHASE.OPENING, PHASE.REBUTTAL, PHASE.REREBUTTAL, PHASE.FINAL_SUMMARY]
+  const speechTypes = ["질문", "반박", "동의"] as const
 
   return members.map((member, idx) => {
     const argumentCard = argumentCards[idx % argumentCards.length]
@@ -231,6 +233,7 @@ export function buildFreeModeImaginedLogs(members: { id: string; name: string; r
     return {
       phase: phases[idx % phases.length],
       speaker: `${member.roleLabel} ${member.name}`.trim(),
+      speechType: speechTypes[idx % speechTypes.length],
       argumentCard,
       argumentKeyword: `${argumentCard} 근거를 자유토론 맥락에서 확장`,
       thinkingCard,

@@ -7,6 +7,7 @@ import { ReportManageView } from "@/components/station/report-manage-view"
 type ReportLogItem = {
   phase: string
   speaker: string
+  speechType?: string
   argumentCard: string
   argumentKeyword: string
   thinkingCard: string
@@ -25,24 +26,28 @@ const FREE_MODE_FALLBACKS: Array<{
   thinkingKeyword: string
 }> = [
   {
+    speechType: "질문",
     argumentCard: "1) 뇌 발달/중독 메커니즘",
     thinkingCard: "적용",
     argumentKeyword: "뇌 발달, 중독, 보상회로",
     thinkingKeyword: "적용, 사례 연결",
   },
   {
+    speechType: "반박",
     argumentCard: "2) 학습권/집중력 저하",
     thinkingCard: "인과 설명",
     argumentKeyword: "학습권, 집중력, 알림 간섭",
     thinkingKeyword: "인과, 원인과 결과",
   },
   {
+    speechType: "동의",
     argumentCard: "3) 수면권/건강권",
     thinkingCard: "비교",
     argumentKeyword: "수면권, 건강권, 피로도",
     thinkingKeyword: "비교, 대안 대비",
   },
   {
+    speechType: "동의",
     argumentCard: "9) 규제보다 미디어 교육",
     thinkingCard: "입장 수정",
     argumentKeyword: "미디어 교육, 자기조절, 장기효과",
@@ -55,6 +60,91 @@ const ORDERED_FALLBACK: Record<OrderedPhaseKey, { argumentCard: string; thinking
   반론: { argumentCard: "5) 실효성/우회 가능성", thinkingCard: "반례 제시" },
   재반론: { argumentCard: "2) 학습권/집중력 저하", thinkingCard: "전제 분석" },
   마무리: { argumentCard: "9) 규제보다 미디어 교육", thinkingCard: "입장 수정" },
+}
+const ORDERED_FALLBACK_VARIANTS: Record<
+  OrderedPhaseKey,
+  Array<{ argumentCard: string; thinkingCard: string; argumentKeyword: string; thinkingKeyword: string }>
+> = {
+  입론: [
+    {
+      argumentCard: "1) 뇌 발달/중독 메커니즘",
+      thinkingCard: "적용",
+      argumentKeyword: "뇌 발달, 보상회로, 자기통제",
+      thinkingKeyword: "적용, 사례 연결",
+    },
+    {
+      argumentCard: "2) 학습권/집중력 저하",
+      thinkingCard: "인과 설명",
+      argumentKeyword: "학습권, 집중력, 알림 간섭",
+      thinkingKeyword: "인과, 원인과 결과",
+    },
+    {
+      argumentCard: "3) 수면권/건강권",
+      thinkingCard: "비교",
+      argumentKeyword: "수면권, 건강권, 피로도",
+      thinkingKeyword: "비교, 대안 대비",
+    },
+  ],
+  반론: [
+    {
+      argumentCard: "5) 실효성/우회 가능성",
+      thinkingCard: "반례 제시",
+      argumentKeyword: "우회 가능성, 실효성, 집행 한계",
+      thinkingKeyword: "반례, 예외 상황",
+    },
+    {
+      argumentCard: "4) 자기결정권/자율성",
+      thinkingCard: "한계 지적",
+      argumentKeyword: "자기결정권, 자율성, 과잉 규제",
+      thinkingKeyword: "한계, 부작용 검토",
+    },
+    {
+      argumentCard: "7) 낙인/감시 부작용",
+      thinkingCard: "전제 분석",
+      argumentKeyword: "낙인, 감시, 신뢰 저하",
+      thinkingKeyword: "전제, 숨은 가정 점검",
+    },
+  ],
+  재반론: [
+    {
+      argumentCard: "2) 학습권/집중력 저하",
+      thinkingCard: "전제 분석",
+      argumentKeyword: "학습권, 집중력, 수업 몰입",
+      thinkingKeyword: "전제, 논리 구조 점검",
+    },
+    {
+      argumentCard: "8) 디지털 역량 저해",
+      thinkingCard: "자료 보완",
+      argumentKeyword: "디지털 역량, 자기조절, 리터러시",
+      thinkingKeyword: "자료 보완, 근거 확장",
+    },
+    {
+      argumentCard: "6) 규제보다 미디어 교육",
+      thinkingCard: "인과 설명",
+      argumentKeyword: "미디어 교육, 자기조절, 장기효과",
+      thinkingKeyword: "인과, 교육 효과",
+    },
+  ],
+  마무리: [
+    {
+      argumentCard: "9) 규제보다 미디어 교육",
+      thinkingCard: "입장 수정",
+      argumentKeyword: "미디어 교육, 자기조절, 장기효과",
+      thinkingKeyword: "입장 수정, 조건부 합의",
+    },
+    {
+      argumentCard: "10) 단계적·조건부 제한",
+      thinkingCard: "비교",
+      argumentKeyword: "단계적 제한, 조건부 정책, 현실성",
+      thinkingKeyword: "비교, 절충안 제시",
+    },
+    {
+      argumentCard: "4) 자기결정권/자율성",
+      thinkingCard: "적용",
+      argumentKeyword: "자율성, 책임, 실제 학교 맥락",
+      thinkingKeyword: "적용, 현실 맥락 연결",
+    },
+  ],
 }
 
 const STOPWORDS = new Set([
@@ -304,6 +394,7 @@ export default async function StationReportPage({
                     return {
                       phase: "자유토론",
                       speaker,
+                      speechType: fallback.speechType,
                       argumentCard: fallback.argumentCard,
                       thinkingCard: fallback.thinkingCard,
                       argumentKeyword: fallback.argumentKeyword,
@@ -323,6 +414,9 @@ export default async function StationReportPage({
                         return (
                           <td key={`${speaker}-${idx}-cell-${cellIdx}`} className="px-3 py-2 text-muted-foreground">
                             <div className="space-y-1">
+                              <p>
+                                <span className="font-semibold text-foreground">유형:</span> {row.speechType && row.speechType !== "-" ? row.speechType : "-"}
+                              </p>
                               <p>
                                 <span className="font-semibold text-foreground">논거:</span> {argumentCard}
                               </p>
@@ -440,10 +534,19 @@ export default async function StationReportPage({
                     <td className="px-3 py-2 font-medium text-foreground">{speaker}</td>
                     {ORDERED_PHASES.map((phaseKey) => {
                       const mapped = perPhase.get(phaseKey)
-                      const fallback = ORDERED_FALLBACK[phaseKey]
-                      const argumentCard = mapped?.argumentCard && mapped.argumentCard !== "-" ? mapped.argumentCard : fallback.argumentCard
-                      const thinkingCard = mapped?.thinkingCard && mapped.thinkingCard !== "-" ? mapped.thinkingCard : fallback.thinkingCard
-                      const keywordSource = `${mapped?.argumentKeyword ?? ""} ${mapped?.thinkingKeyword ?? ""}`.trim()
+                      const fallback = ORDERED_FALLBACK_VARIANTS[phaseKey][idx % ORDERED_FALLBACK_VARIANTS[phaseKey].length]
+                      const baseFallback = ORDERED_FALLBACK[phaseKey]
+                      const argumentCard =
+                        mapped?.argumentCard && mapped.argumentCard !== "-"
+                          ? mapped.argumentCard
+                          : fallback?.argumentCard ?? baseFallback.argumentCard
+                      const thinkingCard =
+                        mapped?.thinkingCard && mapped.thinkingCard !== "-"
+                          ? mapped.thinkingCard
+                          : fallback?.thinkingCard ?? baseFallback.thinkingCard
+                      const keywordSource = `${mapped?.argumentKeyword ?? fallback?.argumentKeyword ?? ""} ${
+                        mapped?.thinkingKeyword ?? fallback?.thinkingKeyword ?? ""
+                      }`.trim()
                       const keywords = extractKeywords(keywordSource)
                       return (
                         <td key={`${speaker}-${phaseKey}`} className="px-3 py-2 text-muted-foreground">
@@ -478,4 +581,3 @@ export default async function StationReportPage({
     </div>
   )
 }
-

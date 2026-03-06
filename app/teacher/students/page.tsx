@@ -28,7 +28,7 @@ export default function StudentsPage() {
   const { sessions } = useMockSessions()
   const [search, setSearch] = useState("")
   const [classFilter, setClassFilter] = useState<string>("all")
-  const [featuredMap, setFeaturedMap] = useState(() => readFeaturedEvidenceMap())
+  const [featuredMap, setFeaturedMap] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
     setFeaturedMap(readFeaturedEvidenceMap())

@@ -16,12 +16,16 @@
 - `Student[]`
 - `DebateEvent[]`
 - `FeaturedEvidenceMap`
+- `DEADLINES[]`
 
 ### Output
 - Pending 세션 요약
 - 준비 상태 집계: `withEvidence`, `withoutEvidence`, `withFeatured`
 - 관찰 필요 학생 목록
 - 최근 근거 digest
+- report kind 집계(`presentation`, `free-debate`, `ordered-debate`)
+- `readyNowEvidence[]`
+- quality badge 계산 결과
 
 ### Example
 ```json
@@ -30,7 +34,14 @@
   "watchGroups": {
     "noEvidence": [{ "studentId": "s13", "name": "문서현" }],
     "noRepresentative": [{ "studentId": "s2", "name": "이서준" }]
-  }
+  },
+  "readyNowEvidence": [
+    {
+      "studentId": "s1",
+      "speechType": "Claim",
+      "quality": "구체적"
+    }
+  ]
 }
 ```
 
@@ -93,6 +104,7 @@
 ### Presentation Output
 - `presentation.secondsPerPresenter`
 - `Session` 생성/수정 후 상세 화면 이동
+- 발표 리포트 row 생성을 위한 presenter 메타 저장
 
 ### Presentation Example
 ```json
@@ -117,6 +129,7 @@
 - 상태 전이: `Pending -> Live -> Ended`
 - 그룹/발언 순서 갱신
 - 종료 시 `/station/report` payload 생성
+- Free mode에서는 `speechType` (`질문/반박/동의`)를 로그에 포함 가능
 
 ### Presentation Input
 - 발표 순서, 발표 시간, 녹음 여부
@@ -125,6 +138,24 @@
 ### Presentation Output
 - 상태 전이
 - 종료 후 요약 테이블 렌더(현재 규칙 기반)
+- 발표자별 리포트 row 계산
+- 발표자 프로필 목록 + 선택 발표자 상세 리포트 렌더
+
+### Presentation Report Row Example
+```json
+{
+  "presenterOrder": 1,
+  "studentName": "김민준",
+  "recording": true,
+  "topicKeywords": ["지역경제", "디지털 전환", "공공성"],
+  "problemKeywords": [],
+  "researchMethodKeywords": ["설문 조사"],
+  "analysisKeywords": ["적용 범위 확장", "원인-결과", "대안 제시"],
+  "majorConnectionKeywords": ["교육학", "디자인"],
+  "competencyKeywords": ["질문 설계"],
+  "growthKeywords": []
+}
+```
 
 ## 6) Station (`/station`)
 ### Input
@@ -178,16 +209,56 @@
 - 세션 멤버/그룹 데이터
 
 ### Output
-- 학생 목록
-- 단계별 매핑 리포트
+- Debate: 학생 프로필 목록 + 선택 학생 상세 리포트
+- Presentation: 발표자 프로필 목록 + 선택 발표자 상세 리포트
+
+### Presentation Report Table Example
+```json
+[
+  {
+    "presenterOrder": 1,
+    "studentName": "김민준",
+    "recording": true,
+    "topicKeywords": ["지역경제", "디지털 전환", "공공성"],
+    "problemKeywords": [],
+    "researchMethodKeywords": ["설문 조사"],
+    "analysisKeywords": ["적용 범위 확장", "원인-결과", "대안 제시"],
+    "majorConnectionKeywords": ["교육학", "디자인"],
+    "competencyKeywords": ["질문 설계"],
+    "growthKeywords": []
+  },
+  {
+    "presenterOrder": 2,
+    "studentName": "이서준",
+    "recording": true,
+    "topicKeywords": ["지역경제", "디지털 전환", "공공성"],
+    "problemKeywords": ["비용 부담", "격차 심화"],
+    "researchMethodKeywords": ["설문 조사"],
+    "analysisKeywords": ["가정 검증", "적용 범위 확장", "원인-결과"],
+    "majorConnectionKeywords": [],
+    "competencyKeywords": ["질문 설계"],
+    "growthKeywords": ["탐구 태도 강화", "관점 전환", "표현 자신감"]
+  }
+]
+```
 
 ## 9) 학생 (`/teacher/students`, `/teacher/students/[id]`)
 ### Input
 - 검색어, 학급 필터, 학생 id
+- `FeaturedEvidenceMap`
+- `Session[]`
+- `DebateEvent[]`
 
 ### Output
 - 필터링된 학생 목록
 - 학생별 세션/근거 히스토리
+- 학생 목록 우선순위 정렬 결과
+- `근거 없음`, `대표 사례 없음` badge 상태
+- 학생 상세의 대표 사례 목록
+- 세특 작성 모드용 참고 문장
+- 역량별 근거 그룹(`academic`, `career`, `community`, `unclassified`)
+- 최근 레포트 반영 근거
+- 전체 기록 보기용 세션 아코디언
 
 ## 10) 설정 (`/teacher/settings`)
 ### Input
@@ -199,5 +270,5 @@
 
 ## 데이터 성격 구분
 - 저장됨(persisted): `Session`, `debate.assignmentConfig`, `presentation.presenters`, featured evidence
-- 계산됨(derived): 대시보드 집계, 관찰 필요 목록, 리포트 키워드 일부
+- 계산됨(derived): 대시보드 집계, 관찰 필요 목록, Debate/Presentation 리포트 키워드 row, 학생 우선순위, quality badge, 역량 그룹핑
 - 화면 전용(ui-local): Station entry state, 토론 런타임 state, 필터 입력값

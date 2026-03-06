@@ -1,6 +1,6 @@
-﻿"use client"
+"use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { DebateMode } from "@/lib/domain/session"
 import { finishParticipantSpeech, startParticipantSpeech } from "@/lib/application/session-service"
 
@@ -110,15 +110,26 @@ export function useParticipantSpeechFlow() {
     }
   }, [clearRequestTimer])
 
-  return {
-    status,
-    completedSpeeches,
-    resetForSession,
-    resetForStudent,
-    syncWithSpeechRunning,
-    requestOrStartSpeech,
-    endSpeech,
-    setStatus,
-  }
+  return useMemo(
+    () => ({
+      status,
+      completedSpeeches,
+      resetForSession,
+      resetForStudent,
+      syncWithSpeechRunning,
+      requestOrStartSpeech,
+      endSpeech,
+      setStatus,
+    }),
+    [
+      status,
+      completedSpeeches,
+      resetForSession,
+      resetForStudent,
+      syncWithSpeechRunning,
+      requestOrStartSpeech,
+      endSpeech,
+      setStatus,
+    ]
+  )
 }
-

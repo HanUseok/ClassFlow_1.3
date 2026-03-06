@@ -42,11 +42,14 @@ interface QuickAddScreenProps {
   participantUseRequestFlow?: boolean
   participantRecordingEnabled?: boolean
   showCards?: boolean
+  speechType?: "질문" | "반박" | "동의" | null
+  onSpeechTypeChange?: (value: "질문" | "반박" | "동의" | null) => void
 }
 
 type SpeechHistoryItem = {
   phase: string
   speaker: string
+  speechType?: string
   argumentCard: string
   argumentKeyword: string
   thinkingCard: string
@@ -96,6 +99,8 @@ export function QuickAddScreen({
   participantUseRequestFlow = true,
   participantRecordingEnabled = true,
   showCards = true,
+  speechType = null,
+  onSpeechTypeChange,
 }: QuickAddScreenProps) {
   const [speechHistory, setSpeechHistory] = useState<SpeechHistoryItem[]>([])
   const isFreeMode = debateMode === "Free"
@@ -175,6 +180,7 @@ export function QuickAddScreen({
         {
           phase: phaseLabel,
           speaker: speakerLabel,
+          speechType: isFreeMode ? speechType ?? "-" : undefined,
           argumentCard,
           argumentKeyword,
           thinkingCard,
@@ -187,6 +193,7 @@ export function QuickAddScreen({
     cards.setPanelOpen(isFreeMode)
     cards.resetEquipped()
     cards.closePreview()
+    if (isFreeMode) onSpeechTypeChange?.(null)
     speechControls.handleEndClick()
   }
 

@@ -93,7 +93,7 @@ export default function DashboardPage() {
   const students = listStudents()
   const events = listDebateEvents()
   const { sessions, hydrated, setStatus } = useMockSessions()
-  const [featuredMap, setFeaturedMap] = useState(() => readFeaturedEvidenceMap())
+  const [featuredMap, setFeaturedMap] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
     setFeaturedMap(readFeaturedEvidenceMap())
